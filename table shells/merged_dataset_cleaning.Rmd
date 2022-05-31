@@ -1,0 +1,218 @@
+---
+title: 'Cleaning Final, Merged Dataset for Analysis'
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+```
+
+```{r}
+library('data.table')
+library('ggplot2')
+library('stringr')
+library('kableExtra')
+```
+
+```{r}
+setwd('//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS')
+dat<-read.csv('FN_NARMS_PulseNet_Census.csv', stringsAsFactors = F)
+setDT(dat)
+```
+
+# Clean variables for demographic tables
+****
+## Age Range
+AgeRange is derived from the **Age** variable. There are `r sum(is.na(dat$AgeRange))` records with missing age range.
+However, there are additional age variables: **PatientAgeYears**, **PatientAgeMonths**, and **PatientAgeDays**, so
+perhaps we can fill in some missing values. 
+```{r, include=T}
+t1<-table(rowSums(is.na(dat[, c('PatientAgeYears', 'PatientAgeMonths', 'PatientAgeDays')]))<3, is.na(dat$Age))
+```
+There are `r t1[4]` records that have a NULL Age value, but have at least one non-missing values for PatientAge*. 
+
+Before we fill-in missing data, let's double-check to make sure that the original AgeRange was calculated correctly. 
+```{r}
+dat<-dat[order(PatientAgeYears),]
+print(dat[AgeUnit=='Months', c('AgeRange', 'Age', 'AgeUnit', 'PatientAgeYears')] , nrow=25)
+```
+It looks like the age unit was neglected when calculating AgeRange. We will need to re-cut that variable.
+
+It also appears that Age was calculated in years based on dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and diagnosis date, was combined with Age from NARMS which was a numeric integer that needed AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeYears and PatientAgeMonths variables to fill in missing values.
+```{r}
+dat$AgeUnit[is.na(dat$AgeUnit) & !is.na(dat$Age)]<-'Years'
+```
+
+```{r}
+dat$AgeClean<-floor(
+               ifelse(dat$AgeUnit=='Years'   & !is.na(dat$Age), dat$Age,
+                ifelse(dat$AgeUnit=='Months' & !is.na(dat$Age), dat$Age/12,
+                   ifelse(is.na(dat$AgeUnit) | is.na(dat$Age) & !is.na(dat$PatientAgeYears), dat$PatientAgeYears, 
+                     ifelse(is.na(dat$AgeUnit) | is.na(dat$Age) & is.na(dat$PatientAgeYears), dat$PatientAgeMonths/12, NA)))))
+```
+
+Ok, let's take a look at the new AgeClean variable and see how it compares to the original. We should see shift in cases originall classified in the 5-24 ages to the <2 age ranges.  
+```{r, echo=F}
+hist(dat$Age, col=rgb(0,0,1,1/4), main='Original and New Age Variables', xlab='Age Variable')
+hist(dat$AgeClean, col=rgb(1,0,0,1/4), add=TRUE)
+legend("topright", c("Original", "New"), col=c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)), lwd=10)
+
+dat$AgeRangeNew<-cut(dat$AgeClean, breaks=c(0, 5, 18, 30, 40, 50, 199), right=F, 
+                     labels=c('0-4','5-17','18-29','30-39','40-49','50+'))
+
+dat<-dat[order(AgeClean),]
+dat[!is.na(AgeRangeNew), list(MinAge=min(AgeClean, na.rm=T), MaxAge=max(AgeClean, na.rm=T)), by='AgeRangeNew']
+```
+There are now only `r sum(is.na(dat$AgeClean))` records with a missing AgeRangeNew value. Thankfully, the other demographic variables (gender, race, ethnicity) look good (no implausible or missing values).
+
+## Group Serotypes
+This code condenses the values in **FinalSpeciesName** into a smaller number of categories. This variable is included in the NARMS dataset. However, there are `r sum(is.na(dat$FinalSpeciesName))`records missing FinalSpeciesName values. There is another field (**serotypesummary**) that has species values that can be used to fill in missing values. The FoodNet Codebook states that the serotypesummary field is a CDC-cleaned version of SeroSite. Per the discussion with Naeemah Logan (5/27), the NARMS FinalSpeciesName field should take precedence. 
+
+```{r}
+dat$SpeciesClean<-ifelse(dat$FinalSpeciesName %in% c(NA, 'unknown'), 
+                         tolower(word(dat$serotypesummary, 1)), dat$FinalSpeciesName)
+dat$SpeciesClean[dat$SpeciesClean %in% c(NA, 'not')]<-'unknown' #adds not serotyped and not speciated to unknown
+table(dat$FinalSpeciesName, dat$SpeciesClean, useNA='ifany')
+```
+
+## FoodNet Site
+I'm leaving a placeholder here because I can't find the field that classifies the FoodNet Site. SiteName is only present for NARMS cases. 
+
+## Resistance Profile
+For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. 
+
+Resistance is grouped into the following variables (not mutually exclusive):
+
+Resistance Type | Definition     | New Field Name
+--------------- | -------------- | --------------
+Ampicillin-R    | AMP_Concl=='R' | AmpR
+Cotrimoxazole-R | COT_Concl=='R' | CotR
+Ciprofloxacin-R | CIP_Concl=='R' | CipR
+Ciprofloxacin-DSC | CIP_Concl %in% c('I', 'R') | CipDSC
+Cefotaxime-R    | CTX_Concl=='R' | CtxR
+Azithromycin-R  | Azm_Concl=='R' | AzmR
+Multidrug-R     | AZM_Concl & AMP_Concl & CIP_Concl & COT_Concl ='R' | MDR
+Extensively Drug-R | MDR==T & AXO_Concl=='R' | XDR
+3+ Abx Resistance  | AbxResSum>2 | MT2Abx
+
+*Resistance does not include intermediate results, with the exception of the Ciprofloxacin-DSC category.* 
+```{r}
+#Individual categories of antibiotic resistance
+dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, c("AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR') := 
+      list(AMP_Concl=='R', 
+           COT_Concl=='R', 
+           CIP_Concl=='R', 
+           CIP_Concl %in% c('I', 'R'), 
+           CTX_Concl=='R', 
+           AZM_Concl=='R')]
+
+#Categories for 3+ abx resistance, multi-drug and x-drug resistant
+abxlist<-paste0(c('AMI','AMP','ATM','AUG','AXO','AZM','CAZ','CCV', 'CEP', 'CEQ', 'CHL','CIP','CLI', 
+                  'COT', 'CTC', 'CTX', 'ERY', 'FEP', 'FFN', 'FIS', 'FOX','GEN', 'IMI', 'KAN','NAL',
+                  'PTZ', 'SMX', 'STR','TEL', 'TET','TIO'), "_Concl")
+
+#Total number of abx resistance categories
+dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
+
+#Three or more abx resistance categories
+dat$MT2Abx<-dat$AbxResSum>2
+
+#Multi-drug resistance
+dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, MDR := rowSums(.SD=='R', na.rm=T)==4, 
+          .SDcols=c('AZM_Concl', 'AMP_Concl', 'CIP_Concl', 'COT_Concl')]
+
+#X-drug resistance
+dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, XDR := MDR==T & AXO_Concl=='R']
+
+#No drug resistance
+dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, NoAbxRes := AbxResSum == 0]
+```
+There are a total of `r sum(dat$AbxResSum>2)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T)` cases of multidrug resistance, and `r sum(dat$XDR==T)` cases of extreme drug resistance. 
+
+### Age density by antibiotic resistance category
+```{r, echo=F}
+temp<-rbind(data.frame(Age=na.exclude(dat$AgeClean[dat$AmpR==T]), Resistance='Ampicillin'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CotR==T]), Resistance='Cotrimoxazole'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CipR==T]), Resistance='Ciprofloxacin-R'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CipDSC==T]), Resistance='Ciprofloxacin-DSC'),
+            #data.frame(Age=na.exclude(dat$AgeClean[dat$CtxR==T]), Resistance='Cefotaxime'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$AzmR==T]), Resistance='Azithromycin'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$MDR==T]), Resistance='Multi-Drug'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$XDR==T]), Resistance='XDR'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$XDR==T]), Resistance='XDR'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$NoAbxRes==T]), Resistance='None'))
+
+ggplot(temp, aes(x=Age, color=Resistance)) +
+  geom_density(alpha=0.4, size=1.2)
+
+setDT(temp)
+t2<-temp[, list(N=.N, Min=min(Age), Mean=mean(Age), Median=median(Age), Max=max(Age)), by='Resistance']
+t2 %>%
+   kbl() %>%
+   kable_minimal()
+```
+
+## Calculate measures of severity
+### Fever
+Fever include patients with a value of "YES" for Fever. There are `r sum(dat$Fever=="YES", na.rm=T)` cases with fever. 
+
+### Hospitalization
+First, we will verify that dates of admission or discharge to a hospital are within the surveillance period. In other words, we will make sure that these are all plausible dates.  
+```{r}
+dates<-c('DtAdmit', 'DtDisch', 'DtAdmit2', 'DtDisch2')
+dat[, (dates) := lapply(.SD, as.Date, format="%m/%d/%Y"), .SDcols = c(dates)]
+dat[, lapply(.SD, min, na.rm=T), .SDcols = c(dates)]
+dat[, lapply(.SD, max, na.rm=T), .SDcols = c(dates)]
+```
+
+Looks good, so we will define hospitalization as any record with a value of YES for Hospital or HospTrans or a non-missing admit or discharge date (initial or second admit/discharge). 
+```{r}
+dat[, HospClean := Hospital=='YES'|HospTrans=='YES'|rowSums(is.na(.SD), na.rm=T)<4, .SDcols=c(dates)]
+```
+There are `r sum(dat$HospClean==T)` records that were hospitalized. 
+
+### Bloody diarrhea
+Bloody diarrhea includes records with a value of "YES" for BloodyDiarr. 
+There are `r sum(dat$BloodyDiarr=="YES", na.rm=T)` cases with bloody diarrhea. 
+
+### Bacteremia
+There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. The other two fields are mostly NA. Per Naeemah Logan (5/26/22), I should use the most complete field (SpecSrce).
+```{r}
+dat$Bacteremia<-dat$SpecSrce=='BLOOD'
+```
+There are `r sum(dat$Bacteremia==T, na.rm=T)` cases with bacteremia. 
+
+### Death
+```{r}
+dat$Death<-dat$Outcome=='DEAD'
+```
+There are `r sum(dat$Death==T, na.rm=T)` cases that died. 
+
+### Non-Severe
+**This was taken directly from the table shell footnote:**
+*Criteria for non- severe classification are no fever, bloody diarrhea, and/or presence of hospitalization, bacteremia, or death.*
+
+I'm not sure how to interpret the and/or specification, but I'm going to process this excluding those from the non-severe category since you can't get much more severe than death. 
+```{r}
+dat[, NonSevere := Fever != 'YES' & HospClean==F & BloodyDiarr != 'YES' & Bacteremia==F & Death==F]
+```
+There are `r sum(dat$NonSevere==T, na.rm=T)` records that were classified as non-severe. 
+
+# Select Fields for Analysis and Output
+***
+Due to the size of the merged dataset, we probably want to restrict columns to only those that will be used for analysis.
+```{r}
+keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
+              "Race", "Ethnicity",  "Gender", 'AgeRangeNew', 'AgeClean', 
+              "SpeciesClean", 
+              "AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR', "AbxResSum", "MDR", "XDR",
+              "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere" ,
+              c(grep("^est|moe", names(dat), value=T)))
+
+final<-dat[, ..keep.fields]
+#Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
+#write.csv(final, "final_analytic_file.csv", row.names=F)
+
+```
