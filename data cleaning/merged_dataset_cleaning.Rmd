@@ -129,7 +129,7 @@ dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, XDR := MDR==T & AXO_Concl=
 #No drug resistance
 dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, NoAbxRes := AbxResSum == 0]
 ```
-There are a total of `r sum(dat$AbxResSum>2)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T)` cases of multidrug resistance, and `r sum(dat$XDR==T)` cases of extreme drug resistance. 
+There are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extreme drug resistance. 
 
 ### Age density by antibiotic resistance category
 ```{r, echo=F}
@@ -211,8 +211,8 @@ keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
               "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere" ,
               c(grep("^est|moe", names(dat), value=T)))
 
-final<-dat[, ..keep.fields]
 #Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
+#final<-dat[, ..keep.fields]
 #write.csv(final, "final_analytic_file.csv", row.names=F)
-
+write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V1.csv", row.names=F)
 ```

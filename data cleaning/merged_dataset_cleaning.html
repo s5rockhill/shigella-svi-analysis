@@ -605,9 +605,10 @@ dat[, lapply(.SD, min, na.rm=T), .SDcols = c(dates)]</code></pre>
               &quot;Fever&quot;, &quot;HospClean&quot;, &quot;BloodyDiarr&quot;, &quot;Bacteremia&quot;, &quot;Death&quot;, &quot;NonSevere&quot; ,
               c(grep(&quot;^est|moe&quot;, names(dat), value=T)))
 
-final&lt;-dat[, ..keep.fields]
 #Output dataset: I&#39;m not activating this code yet until I can confirm which fields we want to keep
-#write.csv(final, &quot;final_analytic_file.csv&quot;, row.names=F)</code></pre>
+#final&lt;-dat[, ..keep.fields]
+#write.csv(final, &quot;final_analytic_file.csv&quot;, row.names=F)
+write.csv(dat, &quot;analytic_file_V1.csv&quot;, row.names=F)</code></pre>
 </div>
 
 
