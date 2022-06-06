@@ -26,12 +26,11 @@ setDT(dat)
 ****
 ## Age Range
 AgeRange is derived from the **Age** variable. There are `r sum(is.na(dat$AgeRange))` records with missing age range.
-However, there are additional age variables: **PatientAgeYears**, **PatientAgeMonths**, and **PatientAgeDays**, so
-perhaps we can fill in some missing values. 
+However, there are additional age variables: **PatientAgeYears**, **PatientAgeMonths**, **PatientAgeDays**, and **PatientAgeFromPulsenet** so perhaps we can fill in some missing values. 
 ```{r, include=T}
-t1<-table(rowSums(is.na(dat[, c('PatientAgeYears', 'PatientAgeMonths', 'PatientAgeDays')]))<3, is.na(dat$Age))
+t1<-table(rowSums(is.na(dat[, c('PatientAgeYears', 'PatientAgeMonths', 'PatientAgeDays', 'PatientAgeFromPulsenet')]))<4, is.na(dat$Age))
 ```
-There are `r t1[4]` records that have a NULL Age value, but have at least one non-missing values for PatientAge*. 
+There are `r t1[4]` records that have a NULL Age value, but have at least one non-missing values for PatientAge* or PatientAgeFromPulesNet. 
 
 Before we fill-in missing data, let's double-check to make sure that the original AgeRange was calculated correctly. 
 ```{r}
@@ -40,20 +39,22 @@ print(dat[AgeUnit=='Months', c('AgeRange', 'Age', 'AgeUnit', 'PatientAgeYears')]
 ```
 It looks like the age unit was neglected when calculating AgeRange. We will need to re-cut that variable.
 
-It also appears that Age was calculated in years based on dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and diagnosis date, was combined with Age from NARMS which was a numeric integer that needed AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeYears and PatientAgeMonths variables to fill in missing values.
+It also appears that Age was calculated in years based on dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and DtSpec date, was combined with Age from NARMS which was a numeric integer that needs AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeYears and PatientAgeMonths variables to fill in missing values.
 ```{r}
 dat$AgeUnit[is.na(dat$AgeUnit) & !is.na(dat$Age)]<-'Years'
+dat$PNAge<-ifelse(grepl("0-", dat$PatientAgeFromPulsenet)==T, 0, as.numeric(dat$PatientAgeFromPulsenet))
 ```
 
 ```{r}
 dat$AgeClean<-floor(
                ifelse(dat$AgeUnit=='Years'   & !is.na(dat$Age), dat$Age,
                 ifelse(dat$AgeUnit=='Months' & !is.na(dat$Age), dat$Age/12,
-                   ifelse(is.na(dat$AgeUnit) | is.na(dat$Age) & !is.na(dat$PatientAgeYears), dat$PatientAgeYears, 
-                     ifelse(is.na(dat$AgeUnit) | is.na(dat$Age) & is.na(dat$PatientAgeYears), dat$PatientAgeMonths/12, NA)))))
+                 ifelse(is.na(dat$Age) & !is.na(dat$PNAge), dat$PNAge,
+                   ifelse(is.na(dat$Age) & is.na(dat$PNAge) & !is.na(dat$PatientAgeYears), dat$PatientAgeYears, 
+                     ifelse(is.na(dat$Age) & is.na(dat$PNAge) & is.na(dat$PatientAgeYears), dat$PatientAgeMonths/12, NA))))))
 ```
 
-Ok, let's take a look at the new AgeClean variable and see how it compares to the original. We should see shift in cases originall classified in the 5-24 ages to the <2 age ranges.  
+Ok, let's take a look at the new AgeClean variable and see how it compares to the original. We should see shift in cases original classified in the 5-24 ages to the <2 age ranges.  
 ```{r, echo=F}
 hist(dat$Age, col=rgb(0,0,1,1/4), main='Original and New Age Variables', xlab='Age Variable')
 hist(dat$AgeClean, col=rgb(1,0,0,1/4), add=TRUE)
@@ -78,7 +79,10 @@ table(dat$FinalSpeciesName, dat$SpeciesClean, useNA='ifany')
 ```
 
 ## FoodNet Site
-I'm leaving a placeholder here because I can't find the field that classifies the FoodNet Site. SiteName is only present for NARMS cases. 
+The State field is equivalent to FoodNet Site. 
+```{r}
+addmargins(table(dat$State, useNA ='ifany' ))
+```
 
 ## Resistance Profile
 For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. 
@@ -100,7 +104,7 @@ Extensively Drug-R | MDR==T & AXO_Concl=='R' | XDR
 *Resistance does not include intermediate results, with the exception of the Ciprofloxacin-DSC category.* 
 ```{r}
 #Individual categories of antibiotic resistance
-dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, c("AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR') := 
+dat[SurveillanceReportable ==1, c("AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR') := 
       list(AMP_Concl=='R', 
            COT_Concl=='R', 
            CIP_Concl=='R', 
@@ -114,22 +118,26 @@ abxlist<-paste0(c('AMI','AMP','ATM','AUG','AXO','AZM','CAZ','CCV', 'CEP', 'CEQ',
                   'PTZ', 'SMX', 'STR','TEL', 'TET','TIO'), "_Concl")
 
 #Total number of abx resistance categories
-dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
+dat[SurveillanceReportable, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
 
 #Three or more abx resistance categories
 dat$MT2Abx<-dat$AbxResSum>2
 
 #Multi-drug resistance
-dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, MDR := rowSums(.SD=='R', na.rm=T)==4, 
+dat[SurveillanceReportable, MDR := rowSums(.SD=='R', na.rm=T)==4, 
           .SDcols=c('AZM_Concl', 'AMP_Concl', 'CIP_Concl', 'COT_Concl')]
 
 #X-drug resistance
-dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, XDR := MDR==T & AXO_Concl=='R']
+dat[SurveillanceReportable, XDR := MDR==T & AXO_Concl=='R']
 
 #No drug resistance
-dat[Surveillance ==1 & Exclude ==0 & LabApproval ==1, NoAbxRes := AbxResSum == 0]
+dat[SurveillanceReportable, NoAbxRes := AbxResSum == 0]
 ```
-There are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extreme drug resistance. 
+
+There were a total of `r sum(dat$SurveillanceReportable, na.rm=T)` cases that had a primary purpose of surveillance, 
+were lab approved and not excluded. These isolates are part of the NARMS surveillance scheme and are included in official NARMS reports.
+
+Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extreme drug resistance. 
 
 ### Age density by antibiotic resistance category
 ```{r, echo=F}
@@ -180,7 +188,7 @@ There are `r sum(dat$BloodyDiarr=="YES", na.rm=T)` cases with bloody diarrhea.
 ### Bacteremia
 There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. The other two fields are mostly NA. Per Naeemah Logan (5/26/22), I should use the most complete field (SpecSrce).
 ```{r}
-dat$Bacteremia<-dat$SpecSrce=='BLOOD'
+dat$Bacteremia<-ifelse(dat$SpecimenSource=='Blood'|is.na(dat$SpecimenSource) & dat$SpecSrce=='BLOOD', T, F)
 ```
 There are `r sum(dat$Bacteremia==T, na.rm=T)` cases with bacteremia. 
 
@@ -214,5 +222,5 @@ keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
 #Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
 #final<-dat[, ..keep.fields]
 #write.csv(final, "final_analytic_file.csv", row.names=F)
-write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V1.csv", row.names=F)
+write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V2.csv", row.names=F)
 ```
