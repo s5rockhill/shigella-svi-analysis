@@ -39,7 +39,7 @@ print(dat[AgeUnit=='Months', c('AgeRange', 'Age', 'AgeUnit', 'PatientAgeYears')]
 ```
 It looks like the age unit was neglected when calculating AgeRange. We will need to re-cut that variable.
 
-It also appears that Age was calculated in years based on dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and DtSpec date, was combined with Age from NARMS which was a numeric integer that needs AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeYears and PatientAgeMonths variables to fill in missing values.
+It also appears that Age was calculated in years based on elapsed dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and DtSpec date, was combined with Age from NARMS which was a numeric integer that needs AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeFromPulseNet, PatientAgeYears, and PatientAgeMonths variables to fill in missing values.
 ```{r}
 dat$AgeUnit[is.na(dat$AgeUnit) & !is.na(dat$Age)]<-'Years'
 dat$PNAge<-ifelse(grepl("0-", dat$PatientAgeFromPulsenet)==T, 0, as.numeric(dat$PatientAgeFromPulsenet))
@@ -85,53 +85,42 @@ addmargins(table(dat$State, useNA ='ifany' ))
 ```
 
 ## Resistance Profile
-For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. 
+For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. Note, the field **SurveillanceReportable** is a flag variable for cases with Surveillance ==1 & Exclude ==0 & LabApproval ==1, so I'm going to use that for brevity. 
 
 Resistance is grouped into the following variables (not mutually exclusive):
 
 Resistance Type | Definition     | New Field Name
 --------------- | -------------- | --------------
 Ampicillin-R    | AMP_Concl=='R' | AmpR
-Cotrimoxazole-R | COT_Concl=='R' | CotR
-Ciprofloxacin-R | CIP_Concl=='R' | CipR
-Ciprofloxacin-DSC | CIP_Concl %in% c('I', 'R') | CipDSC
-Cefotaxime-R    | CTX_Concl=='R' | CtxR
 Azithromycin-R  | Azm_Concl=='R' | AzmR
-Multidrug-R     | AZM_Concl & AMP_Concl & CIP_Concl & COT_Concl ='R' | MDR
-Extensively Drug-R | MDR==T & AXO_Concl=='R' | XDR
-3+ Abx Resistance  | AbxResSum>2 | MT2Abx
+Ciprofloxacin-R | CIP_Concl %in% c('I', 'R') | CipR
+Trimethoprim-Sulfamethoxazole-R  | COT_Concl=='R' | CotR
+Ceftriaxone-R   | AXO_Concl=='R' | AxoR
+Multidrug-R     | AMP_Concl & AZM_Concl & CIP_Concl & COT_Concl ='R' | MDR
+Extensive Drug-R | MDR==T & AXO_Concl=='R' | XDR
 
 *Resistance does not include intermediate results, with the exception of the Ciprofloxacin-DSC category.* 
 ```{r}
 #Individual categories of antibiotic resistance
-dat[SurveillanceReportable ==1, c("AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR') := 
+dat[SurveillanceReportable ==1, c("AmpR", 'AzmR', "CipR", "CotR",  'AxoR') := 
       list(AMP_Concl=='R', 
+           AZM_Concl=='R',
+           CIP_Concl %in% c('I', 'R'),
            COT_Concl=='R', 
-           CIP_Concl=='R', 
-           CIP_Concl %in% c('I', 'R'), 
-           CTX_Concl=='R', 
-           AZM_Concl=='R')]
+           AXO_Concl=='R')]
 
-#Categories for 3+ abx resistance, multi-drug and x-drug resistant
-abxlist<-paste0(c('AMI','AMP','ATM','AUG','AXO','AZM','CAZ','CCV', 'CEP', 'CEQ', 'CHL','CIP','CLI', 
-                  'COT', 'CTC', 'CTX', 'ERY', 'FEP', 'FFN', 'FIS', 'FOX','GEN', 'IMI', 'KAN','NAL',
-                  'PTZ', 'SMX', 'STR','TEL', 'TET','TIO'), "_Concl")
-
-#Total number of abx resistance categories
-dat[SurveillanceReportable, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
-
-#Three or more abx resistance categories
-dat$MT2Abx<-dat$AbxResSum>2
+#Number of antibiotic resistance categories, multi-drug and x-drug resistant
+abxlist<-paste0(c('AMP', 'AZM', 'CIP', 'COT', 'AXO'), "_Concl")
+dat[SurveillanceReportable==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
 
 #Multi-drug resistance
-dat[SurveillanceReportable, MDR := rowSums(.SD=='R', na.rm=T)==4, 
-          .SDcols=c('AZM_Concl', 'AMP_Concl', 'CIP_Concl', 'COT_Concl')]
+dat[SurveillanceReportable==1, MDR := rowSums(.SD=='R', na.rm=T)==4, .SDcols=abxlist[1:4]]
 
 #X-drug resistance
-dat[SurveillanceReportable, XDR := MDR==T & AXO_Concl=='R']
+dat[SurveillanceReportable==1, XDR := MDR==T & AXO_Concl=='R']
 
 #No drug resistance
-dat[SurveillanceReportable, NoAbxRes := AbxResSum == 0]
+dat[SurveillanceReportable==1, NoAbxRes := AbxResSum == 0]
 ```
 
 There were a total of `r sum(dat$SurveillanceReportable, na.rm=T)` cases that had a primary purpose of surveillance, 
@@ -142,13 +131,11 @@ Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases tha
 ### Age density by antibiotic resistance category
 ```{r, echo=F}
 temp<-rbind(data.frame(Age=na.exclude(dat$AgeClean[dat$AmpR==T]), Resistance='Ampicillin'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CotR==T]), Resistance='Cotrimoxazole'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CipR==T]), Resistance='Ciprofloxacin-R'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CipDSC==T]), Resistance='Ciprofloxacin-DSC'),
-            #data.frame(Age=na.exclude(dat$AgeClean[dat$CtxR==T]), Resistance='Cefotaxime'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$AzmR==T]), Resistance='Azithromycin'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CipR==T]), Resistance='Ciprofloxacin-R'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CotR==T]), Resistance='Cotrimoxazole'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$AxoR==T]), Resistance='Ceftriaxone'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$MDR==T]), Resistance='Multi-Drug'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$XDR==T]), Resistance='XDR'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$XDR==T]), Resistance='XDR'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$NoAbxRes==T]), Resistance='None'))
 
@@ -186,9 +173,11 @@ Bloody diarrhea includes records with a value of "YES" for BloodyDiarr.
 There are `r sum(dat$BloodyDiarr=="YES", na.rm=T)` cases with bloody diarrhea. 
 
 ### Bacteremia
-There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. The other two fields are mostly NA. Per Naeemah Logan (5/26/22), I should use the most complete field (SpecSrce).
+There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. 
 ```{r}
-dat$Bacteremia<-ifelse(dat$SpecimenSource=='Blood'|is.na(dat$SpecimenSource) & dat$SpecSrce=='BLOOD', T, F)
+dat$Bacteremia<-ifelse(dat$SpecimenSource=='Blood'|
+                       (is.na(dat$SpecimenSource) & dat$SpecSrce=='BLOOD') |
+                       (is.na(dat$SpecimenSource) & is.na(dat$SpecSrce) & dat$SourceSite=='Blood'), T, F)
 ```
 There are `r sum(dat$Bacteremia==T, na.rm=T)` cases with bacteremia. 
 
@@ -202,9 +191,11 @@ There are `r sum(dat$Death==T, na.rm=T)` cases that died.
 **This was taken directly from the table shell footnote:**
 *Criteria for non- severe classification are no fever, bloody diarrhea, and/or presence of hospitalization, bacteremia, or death.*
 
-I'm not sure how to interpret the and/or specification, but I'm going to process this excluding those from the non-severe category since you can't get much more severe than death. 
+I'm not sure how to interpret the and/or specification, but I'm going to process this excluding those from the non-severe category since you can't get much more severe than death. This field is going to be mostly NA because Fever, BloodyDiarr and Bacteremia are mostly NA or UNKNOWN.
 ```{r}
-dat[, NonSevere := Fever != 'YES' & HospClean==F & BloodyDiarr != 'YES' & Bacteremia==F & Death==F]
+dat$NonSevere<-ifelse(dat$Fever=='NO' & dat$HospClean==F & dat$BloodyDiarr=='NO' & dat$Bacteremia==F & dat$Death==F, T,
+               ifelse(dat$Fever=='YES'| dat$HospClean==T| dat$BloodyDiarr=='YES' | dat$Bacteremia==T | dat$Death==T, F,
+                      NA))
 ```
 There are `r sum(dat$NonSevere==T, na.rm=T)` records that were classified as non-severe. 
 
@@ -212,15 +203,20 @@ There are `r sum(dat$NonSevere==T, na.rm=T)` records that were classified as non
 ***
 Due to the size of the merged dataset, we probably want to restrict columns to only those that will be used for analysis.
 ```{r}
+options(scipen=500)
 keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
               "Race", "Ethnicity",  "Gender", 'AgeRangeNew', 'AgeClean', 
               "SpeciesClean", 
-              "AmpR", "CotR", "CipR", "CipDSC", 'CtxR', 'AzmR', "AbxResSum", "MDR", "XDR",
-              "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere" ,
-              c(grep("^est|moe", names(dat), value=T)))
+         Plymouth, United Kingdom     "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', "AbxResSum", "MDR", "XDR",
+              "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere")
 
 #Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
 #final<-dat[, ..keep.fields]
-#write.csv(final, "final_analytic_file.csv", row.names=F)
-write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V2.csv", row.names=F)
+write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", row.names=F)
 ```
+
+```{r}
+temp<-read.csv("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", stringsAsFactors = F)
+table(grepl('e', temp$CTNO2000))
+```
+
