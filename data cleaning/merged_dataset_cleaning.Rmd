@@ -1,5 +1,10 @@
 ---
 title: 'Cleaning Final, Merged Dataset for Analysis'
+knit: (function(input_file, encoding) {
+    out_dir <- 'docs';
+    rmarkdown::render(input_file,
+      encoding=encoding,
+      output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 output:
   html_document:
     df_print: paged
@@ -206,17 +211,16 @@ Due to the size of the merged dataset, we probably want to restrict columns to o
 options(scipen=500)
 keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
               "Race", "Ethnicity",  "Gender", 'AgeRangeNew', 'AgeClean', 
-              "SpeciesClean", 
-         Plymouth, United Kingdom     "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', "AbxResSum", "MDR", "XDR",
+              "SpeciesClean",  "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', "AbxResSum", "MDR", "XDR",
               "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere")
 
 #Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
 #final<-dat[, ..keep.fields]
-write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", row.names=F)
+#write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", row.names=F)
 ```
 
 ```{r}
-temp<-read.csv("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", stringsAsFactors = F)
-table(grepl('e', temp$CTNO2000))
+#temp<-read.csv("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", stringsAsFactors = F)
+#table(grepl('e', temp$CTNO2000))
 ```
 
