@@ -45,7 +45,7 @@ dat$Abx4More<-dat$AbxResSum>=4
 #-------------------------------------------------------------------------------
 #We can use other breaks for age standardization if desired, but they have to align with 
 #available population denominators for all demographic categories
-dat$AgeStd<-cut(dat$AgeClean, breaks=c(0, 5, 15, 25, 35, 45, 55, 65, 75, 85, 999), right=F, labels=StdAgeCat)
+dat$AgeStd<-cut(dat$AgeClean, breaks=c(0, 5, seq(15, 85, by=10), 999), right=F, labels=StdAgeCat)
 
 varlist<-c('Sex', "Ethnicity", "Race",  "State", 
            "SpeciesClean", "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', 
@@ -128,7 +128,6 @@ Result[,paste0(cols, ".Perc") := lapply(.SD, function(x) round(x/Total*100, 1)),
 #Merge age-adjusted incidence rates and confidence limits
 #-------------------------------------------------------------------------------
 Result<-merge(Result, ir, by=c('Category', 'Values'), all=T)
-
 
 
 #-------------------------------------------------------------------------------

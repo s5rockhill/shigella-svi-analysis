@@ -2341,16 +2341,17 @@ UNKNOWN.</p>
 <hr />
 <p>Due to the size of the merged dataset, we probably want to restrict
 columns to only those that will be used for analysis.</p>
-<pre class="r"><code>keep.fields&lt;-c(&quot;ID&quot;,  &quot;Year&quot;, &#39;SiteName&#39;,&quot;CountyName&quot; , &quot;CTNO2000&quot;, &quot;CTNO2010&quot; ,
+<pre class="r"><code>options(scipen=500)
+keep.fields&lt;-c(&quot;ID&quot;,  &quot;Year&quot;, &#39;SiteName&#39;,&quot;CountyName&quot; , &quot;CTNO2000&quot;, &quot;CTNO2010&quot; ,
               &quot;Race&quot;, &quot;Ethnicity&quot;,  &quot;Gender&quot;, &#39;AgeRangeNew&#39;, &#39;AgeClean&#39;, 
-              &quot;SpeciesClean&quot;, 
-              &quot;AmpR&quot;, &quot;CotR&quot;, &quot;CipR&quot;, &#39;AxoR&#39;, &#39;AzmR&#39;, &quot;AbxResSum&quot;, &quot;MDR&quot;, &quot;XDR&quot;,
+              &quot;SpeciesClean&quot;,  &quot;AmpR&quot;, &quot;CotR&quot;, &quot;CipR&quot;, &#39;AxoR&#39;, &#39;AzmR&#39;, &quot;AbxResSum&quot;, &quot;MDR&quot;, &quot;XDR&quot;,
               &quot;Fever&quot;, &quot;HospClean&quot;, &quot;BloodyDiarr&quot;, &quot;Bacteremia&quot;, &quot;Death&quot;, &quot;NonSevere&quot;)
 
 #Output dataset: I&#39;m not activating this code yet until I can confirm which fields we want to keep
 #final&lt;-dat[, ..keep.fields]
-#write.csv(final, &quot;final_analytic_file.csv&quot;, row.names=F)
-#write.csv(dat, &quot;//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V2.csv&quot;, row.names=F)</code></pre>
+#write.csv(dat, &quot;//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv&quot;, row.names=F)</code></pre>
+<pre class="r"><code>#temp&lt;-read.csv(&quot;//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv&quot;, stringsAsFactors = F)
+#table(grepl(&#39;e&#39;, temp$CTNO2000))</code></pre>
 </div>
 
 
