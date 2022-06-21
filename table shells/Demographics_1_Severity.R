@@ -17,7 +17,7 @@ std.pop<-data.frame(AgeStd= as.factor(StdAgeCat),
 #Import and aggregate population counts
 #-------------------------------------------------------------------------------
 setwd('//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/')
-pop<-read.csv("population_est_by_age_sex.csv")
+pop<-read.csv("FoodNet Population Data/foodnet_county_population_2004_2019.csv")
 setDT(pop)
 
 pop$AgeStd<-factor(pop$AgeStd, levels=StdAgeCat)
@@ -31,7 +31,8 @@ t5<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(
 #-------------------------------------------------------------------------------
 #Import shigella case data
 #-------------------------------------------------------------------------------
-dat<-read.csv("FoodNet_NARMS/analytic_file_V4.csv")
+dat<-read.csv("FoodNet_NARMS/analytic_file_V5.csv")
+setDT(dat)
 
 #Classify cases by number of resistance categories
 #-------------------------------------------------------------------------------
@@ -43,29 +44,25 @@ dat$Abx4More<-dat$AbxResSum>=4
 #-------------------------------------------------------------------------------
 #Calculate number of cases by categories and age groups for age-standardization
 #-------------------------------------------------------------------------------
-#We can use other breaks for age standardization if desired, but they have to align with 
-#available population denominators for all demographic categories
 dat$AgeStd<-cut(dat$AgeClean, breaks=c(0, 5, seq(15, 85, by=10), 999), right=F, labels=StdAgeCat)
+
+cols<-c('NonSevere', 'Fever', 'HospClean', 'BloodyDiarr', 'Bacteremia', 'Death')
+
+Result<-merge(dat[, list(Category='Total', Values='All', Total=.N), by='AgeStd'],
+              dat[, lapply(.SD, function(x) sum(x %in% c("YES", T), na.rm=T)), by='AgeStd', .SDcols=cols],
+              by='AgeStd')
 
 varlist<-c('Sex', "Ethnicity", "Race",  "State", 
            "SpeciesClean", "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', 
            'Abx1More', 'Abx2More', 'Abx3More', 'Abx4More', 'MDR', 'XDR')
 
-Result <- data.frame(matrix(nrow = 0, ncol = 10))
-for (i in 1:length(varlist)){
-  t<-dat[, list(
-                Total=.N, 
-                NonSevere=sum(NonSevere==T, na.rm=T), 
-                Fever=sum(Fever=='YES', na.rm=T), 
-                Hospitalization=sum(HospClean==T, na.rm=T),
-                Bloody_Diarrhea=sum(BloodyDiarr=='YES', na.rm=T),
-                Bacteremia=sum(Bacteremia==T, na.rm=T),
-                Death=sum(Death==T, na.rm=T)), 
-         by=c('AgeStd', eval(varlist[i]))]
-  
-  setnames(t, varlist[i], "Values")
-  t$Category<-varlist[i]
-  Result<-rbind(Result, t)
+for (i in (varlist)){
+  x<-dat[, list(Category=i, Total=.N) , by=c('AgeStd', eval(i))]
+  y<-dat[, lapply(.SD, function(x) sum(x %in% c("YES", T), na.rm=T)), by=c('AgeStd', eval(i)), .SDcols=cols]
+  z<-merge(x, y, by=c(i, 'AgeStd'))
+  setnames(z, i, "Values")
+  Result<-rbind(Result, z)
+  rm(x, y, z)
 }
 
 #Drop FALSE and NA for abx resistance categories
@@ -76,12 +73,13 @@ Result<-subset(Result, !(Category %in% varlist[6:16] & Values %in% c(NA, FALSE))
 # calculation. Note, cases with unknown age are excluded from IR calculation
 #-------------------------------------------------------------------------------
 
-#First, we need to replicate t1 for all categories that are age-adjusted to 
-# total population, then we will format remaining population tables for stacking
-t1<-do.call("rbind", replicate(11+length(unique(dat$SpeciesClean)), t1, simplify = FALSE))
-t1$Category<-c(rep(varlist[6:16], each=10), 
-               rep('SpeciesClean', each=10, times=length(unique(dat$SpeciesClean))))
-t1$Values<-c(rep(TRUE, each=10, times=11), rep(unique(dat$SpeciesClean), each=10))
+#First, we need to replicate t1 for the 12 categories that are age-adjusted to total population, 
+#then we will format remaining population tables for stacking
+species<-unique(dat$SpeciesClean)
+
+t1<-do.call("rbind", replicate(12+length(species), t1, simplify = FALSE))
+t1$Category<-c(rep("Total", 10), rep(varlist[6:16], each=10), rep('SpeciesClean', each=10, times=length(species)))
+t1$Values<-c(rep("All", 10), rep(TRUE, each=10, times=11), rep(species, each=10))
 
 names(t2)[colnames(t2)=='Sex']<-'Values'
 t2$Category<-'Sex'
@@ -101,44 +99,54 @@ t6<-rbind(t1, t2, t3, t4, t5)
 ir<-merge(t6, Result, by=c('Category', 'Values', 'AgeStd'), all.x=T)
 
 #Fill in NA values for records that have zero cases in that category
-cols<-c('Total', 'NonSevere', 'Fever', 'Hospitalization', 'Bloody_Diarrhea', 'Bacteremia', 'Death')
-ir[ , (cols) := lapply(.SD, nafill, fill=0), .SDcols = cols]
+cols<-c("Total", cols)
+ir[ , c(cols)  := lapply(.SD, nafill, fill=0), .SDcols = cols]
 
 #Calculate incidence rate and confidence limits within each category
 ir<-ir[, as.list(unlist(
          lapply(.SD, function(x) 
-           round(
-           ageadjust.direct(x, Population, rate=NULL, std.pop$Population)[2:4]
+           round(ageadjust.direct(x, Population, rate=NULL, std.pop$Population)[2:4]
            *100000, digits = 3)))), 
-         by=c('Category', 'Values'),
-         .SDcols=names(ir)[5:11]]
+           by=c('Category', 'Values'), .SDcols=cols]
 
 #Replace lcl NaN values with zero
-ir[is.nan(ir)] <- 0   
+ir[is.na(ir)] <- 0   
 
+#Format confidence limits into single column
+for (i in cols){
+    ir[,paste0(i, ".ci"):=
+         list(paste0("(", 
+                  sprintf("%0.3f", get(paste0(i, ".lci"))), 
+                  " - ", 
+                    sprintf("%0.3f", get(paste0(i, ".uci"))), 
+                      ")"))]
+}
+       
 #-------------------------------------------------------------------------------
 #Calculate total cases and row percents within each category
 #-------------------------------------------------------------------------------
 Result<-Result[, lapply(.SD, sum), by=c('Category', 'Values'), .SDcols=cols]
 
-Result[,paste0(cols, ".Perc") := lapply(.SD, function(x) round(x/Total*100, 1)), 
-       .SDcols=cols]
+Result[,paste0(cols,".Perc") := lapply(.SD, function(x) round(x/Total*100, 1)), .SDcols=cols]
 
 #-------------------------------------------------------------------------------
 #Merge age-adjusted incidence rates and confidence limits
 #-------------------------------------------------------------------------------
-Result<-merge(Result, ir, by=c('Category', 'Values'), all=T)
-
+ir.cols<-grep("Category|Values|adj.rate|\\.ci", names(ir), value = T)
+Result<-merge(Result, ir[,..ir.cols], by=c('Category', 'Values'), all=T)
 
 #-------------------------------------------------------------------------------
 #Order Columns for output (makes copying and pasting easier) and output
 #-------------------------------------------------------------------------------
-setcolorder(Result, c('Category', 'Values', 
-                      paste0(rep(cols, each=5), c("", ".Perc", ".adj.rate", ".lci", ".uci"))))
+setcolorder(Result, c('Category', 'Values', paste0(rep(cols, each=4), c("", ".Perc", ".adj.rate", ".ci"))))
+Result$Category<-factor(Result$Category, levels=c('Total', 'Sex', 'Ethnicity', 'Race', 'SpeciesClean',
+                                                  'State', "AmpR",  "CotR", "CipR", "AxoR", "AzmR", 
+                                                  "Abx1More","Abx2More","Abx3More","Abx4More", "MDR", "XDR"))
+
+Result<-Result[order(Category),]
                     
 setwd('//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Output Datasets For Follow-Up')
 write.xlsx(Result, 'Preliminary Results for Table 1.xlsx')
 
 # End
 #-------------------------------------------------------------------------------
-  
