@@ -71,15 +71,26 @@ dat$AgeRangeNew<-cut(dat$AgeClean, breaks=c(0, 5, 18, 30, 40, 50, 199), right=F,
 dat<-dat[order(AgeClean),]
 dat[!is.na(AgeRangeNew), list(MinAge=min(AgeClean, na.rm=T), MaxAge=max(AgeClean, na.rm=T)), by='AgeRangeNew']
 ```
-There are now only `r sum(is.na(dat$AgeClean))` records with a missing AgeRangeNew value. Thankfully, the other demographic variables (gender, race, ethnicity) look good (no implausible or missing values).
+There are now only `r sum(is.na(dat$AgeClean))` records with a missing AgeRangeNew value. 
+
+## Sex
+There are a few cases with unknown Sex that have Gender information. We will fill-in those missing
+values. 
+```{r}
+dat$Sex<-ifelse(dat$Sex=='U' & !is.na(dat$Gender), dat$Gender, dat$Sex)
+```
 
 ## Group Serotypes
 This code condenses the values in **FinalSpeciesName** into a smaller number of categories. This variable is included in the NARMS dataset. However, there are `r sum(is.na(dat$FinalSpeciesName))`records missing FinalSpeciesName values. There is another field (**serotypesummary**) that has species values that can be used to fill in missing values. The FoodNet Codebook states that the serotypesummary field is a CDC-cleaned version of SeroSite. Per the discussion with Naeemah Logan (5/27), the NARMS FinalSpeciesName field should take precedence. 
 
 ```{r}
-dat$SpeciesClean<-ifelse(dat$FinalSpeciesName %in% c(NA, 'unknown'), 
+dat$SpeciesClean<-ifelse(dat$FinalGenusName !="Shigella" | 
+                         dat$FinalSpeciesName %in% c(NA, 'unknown', 'other'), 
                          tolower(word(dat$serotypesummary, 1)), dat$FinalSpeciesName)
-dat$SpeciesClean[dat$SpeciesClean %in% c(NA, 'not')]<-'unknown' #adds not serotyped and not speciated to unknown
+
+#Add not serotyped and not speciated to unknown
+dat$SpeciesClean[dat$SpeciesClean %in% c(NA, 'not')]<-'unknown' 
+
 table(dat$FinalSpeciesName, dat$SpeciesClean, useNA='ifany')
 ```
 
@@ -91,6 +102,18 @@ addmargins(table(dat$State, useNA ='ifany' ))
 
 ## Resistance Profile
 For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. Note, the field **SurveillanceReportable** is a flag variable for cases with Surveillance ==1 & Exclude ==0 & LabApproval ==1, so I'm going to use that for brevity. 
+
+First, we will update the subpop1 variable according to the instructions Layne provided. 
+This flag should be 1 for cases that have a SurveillanceReportable value of 1 AND have 
+a non-missing or unknown ResistancePattern.
+```{r}
+dat$SubPopNew<-dat$SurveillanceReportable==1 & !is.na(dat$ResistancePattern)
+dat$subpop1<-NULL
+```
+
+There are `r sum(dat$SubPopNew==T, na.rm=T)` cases that are had a primary purpose of surveillance, 
+were lab approved, were not excluded and have antibiotic resistance information. These isolates are 
+part of the NARMS surveillance scheme and are included in official NARMS reports.
 
 Resistance is grouped into the following variables (not mutually exclusive):
 
@@ -104,10 +127,10 @@ Ceftriaxone-R   | AXO_Concl=='R' | AxoR
 Multidrug-R     | AMP_Concl & AZM_Concl & CIP_Concl & COT_Concl ='R' | MDR
 Extensive Drug-R | MDR==T & AXO_Concl=='R' | XDR
 
-*Resistance does not include intermediate results, with the exception of the Ciprofloxacin-DSC category.* 
+*Resistance does not include intermediate results, with the exception of the Ciprofloxacin-R category.* 
 ```{r}
 #Individual categories of antibiotic resistance
-dat[SurveillanceReportable ==1, c("AmpR", 'AzmR', "CipR", "CotR",  'AxoR') := 
+dat[SubPopNew ==1, c("AmpR", 'AzmR', "CipR", "CotR",  'AxoR') := 
       list(AMP_Concl=='R', 
            AZM_Concl=='R',
            CIP_Concl %in% c('I', 'R'),
@@ -116,20 +139,17 @@ dat[SurveillanceReportable ==1, c("AmpR", 'AzmR', "CipR", "CotR",  'AxoR') :=
 
 #Number of antibiotic resistance categories, multi-drug and x-drug resistant
 abxlist<-paste0(c('AMP', 'AZM', 'CIP', 'COT', 'AXO'), "_Concl")
-dat[SurveillanceReportable==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
+dat[SubPopNew==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
 
 #Multi-drug resistance
-dat[SurveillanceReportable==1, MDR := rowSums(.SD=='R', na.rm=T)==4, .SDcols=abxlist[1:4]]
+dat[SubPopNew==1, MDR := rowSums(.SD=='R', na.rm=T)==4, .SDcols=abxlist[1:4]]
 
 #X-drug resistance
-dat[SurveillanceReportable==1, XDR := MDR==T & AXO_Concl=='R']
+dat[SubPopNew==1, XDR := MDR==T & AXO_Concl=='R']
 
 #No drug resistance
-dat[SurveillanceReportable==1, NoAbxRes := AbxResSum == 0]
+dat[SubPopNew==1, NoAbxRes := AbxResSum == 0]
 ```
-
-There were a total of `r sum(dat$SurveillanceReportable, na.rm=T)` cases that had a primary purpose of surveillance, 
-were lab approved and not excluded. These isolates are part of the NARMS surveillance scheme and are included in official NARMS reports.
 
 Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extreme drug resistance. 
 
@@ -156,6 +176,10 @@ t2 %>%
 
 ## Calculate measures of severity
 ### Fever
+```{r}
+dat$Fever[is.na(dat$Fever)]<-'UNKNOWN'
+```
+
 Fever include patients with a value of "YES" for Fever. There are `r sum(dat$Fever=="YES", na.rm=T)` cases with fever. 
 
 ### Hospitalization
@@ -175,14 +199,18 @@ There are `r sum(dat$HospClean==T)` records that were hospitalized.
 
 ### Bloody diarrhea
 Bloody diarrhea includes records with a value of "YES" for BloodyDiarr. 
+```{r}
+dat$BloodyDiarr[is.na(dat$BloodyDiarr)]<-'UNKNOWN'
+```
 There are `r sum(dat$BloodyDiarr=="YES", na.rm=T)` cases with bloody diarrhea. 
 
 ### Bacteremia
 There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. 
 ```{r}
-dat$Bacteremia<-ifelse(dat$SpecimenSource=='Blood'|
-                       (is.na(dat$SpecimenSource) & dat$SpecSrce=='BLOOD') |
-                       (is.na(dat$SpecimenSource) & is.na(dat$SpecSrce) & dat$SourceSite=='Blood'), T, F)
+dat$Bacteremia<-dat$SpecimenSource=='Blood'
+dat$Bacteremia[is.na(dat$Bacteremia) & dat$SpecSrce=='BLOOD']<-T
+dat$Bacteremia[is.na(dat$Bacteremia) & dat$SourceSite=='Blood']<-T
+dat$Bacteremia[is.na(dat$Bacteremia)]<-F
 ```
 There are `r sum(dat$Bacteremia==T, na.rm=T)` cases with bacteremia. 
 
@@ -198,29 +226,21 @@ There are `r sum(dat$Death==T, na.rm=T)` cases that died.
 
 I'm not sure how to interpret the and/or specification, but I'm going to process this excluding those from the non-severe category since you can't get much more severe than death. This field is going to be mostly NA because Fever, BloodyDiarr and Bacteremia are mostly NA or UNKNOWN.
 ```{r}
-dat$NonSevere<-ifelse(dat$Fever=='NO' & dat$HospClean==F & dat$BloodyDiarr=='NO' & dat$Bacteremia==F & dat$Death==F, T,
-               ifelse(dat$Fever=='YES'| dat$HospClean==T| dat$BloodyDiarr=='YES' | dat$Bacteremia==T | dat$Death==T, F,
-                      NA))
+dat$NonSevere<-ifelse(dat$Fever=='YES'|dat$HospClean==T|dat$BloodyDiarr=='YES'|dat$Bacteremia==T|dat$Death==T, F, T)
 ```
 There are `r sum(dat$NonSevere==T, na.rm=T)` records that were classified as non-severe. 
 
 # Select Fields for Analysis and Output
 ***
-Due to the size of the merged dataset, we probably want to restrict columns to only those that will be used for analysis.
+Due to the size of the merged dataset, we will restrict columns to only those that will be used for analysis.
 ```{r}
-options(scipen=500)
-keep.fields<-c("ID",  "Year", 'SiteName',"CountyName" , "CTNO2000", "CTNO2010" ,
-              "Race", "Ethnicity",  "Gender", 'AgeRangeNew', 'AgeClean', 
-              "SpeciesClean",  "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', "AbxResSum", "MDR", "XDR",
-              "Fever", "HospClean", "BloodyDiarr", "Bacteremia", "Death", "NonSevere")
-
-#Output dataset: I'm not activating this code yet until I can confirm which fields we want to keep
-#final<-dat[, ..keep.fields]
-#write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", row.names=F)
+columns<-openxlsx::read.xlsx('//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Data Dictionaries/dataset_columns.xlsx')
+keep<-columns$Name[columns$Remove==F]
+final<-dat[, ..keep]
 ```
 
 ```{r}
-#temp<-read.csv("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V4.csv", stringsAsFactors = F)
-#table(grepl('e', temp$CTNO2000))
+options(scipen=500)
+write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V5.csv", row.names=F)
 ```
 
