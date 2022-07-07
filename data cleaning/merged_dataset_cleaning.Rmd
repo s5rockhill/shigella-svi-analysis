@@ -1,10 +1,6 @@
 ---
 title: 'Cleaning Final, Merged Dataset for Analysis'
-knit: (function(input_file, encoding) {
-    out_dir <- 'docs';
-    rmarkdown::render(input_file,
-      encoding=encoding,
-      output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+
 output:
   html_document:
     df_print: paged
@@ -130,10 +126,11 @@ Extensive Drug-R | MDR==T & AXO_Concl=='R' | XDR
 *Resistance does not include intermediate results, with the exception of the Ciprofloxacin-R category.* 
 ```{r}
 #Individual categories of antibiotic resistance
-dat[SubPopNew ==1, c("AmpR", 'AzmR', "CipR", "CotR",  'AxoR') := 
+dat[SubPopNew ==1, c("AmpR", 'AzmR', "CipDSC", "CipR", "CotR",  'AxoR') := 
       list(AMP_Concl=='R', 
            AZM_Concl=='R',
            CIP_Concl %in% c('I', 'R'),
+           CIP_Concl=='R',
            COT_Concl=='R', 
            AXO_Concl=='R')]
 
@@ -151,12 +148,13 @@ dat[SubPopNew==1, XDR := MDR==T & AXO_Concl=='R']
 dat[SubPopNew==1, NoAbxRes := AbxResSum == 0]
 ```
 
-Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extreme drug resistance. 
+Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extensive drug resistance. 
 
 ### Age density by antibiotic resistance category
 ```{r, echo=F}
 temp<-rbind(data.frame(Age=na.exclude(dat$AgeClean[dat$AmpR==T]), Resistance='Ampicillin'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$AzmR==T]), Resistance='Azithromycin'),
+            data.frame(Age=na.exclude(dat$AgeClean[dat$CipDSC==T]), Resistance='Ciprofloxacin-DSC'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$CipR==T]), Resistance='Ciprofloxacin-R'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$CotR==T]), Resistance='Cotrimoxazole'),
             data.frame(Age=na.exclude(dat$AgeClean[dat$AxoR==T]), Resistance='Ceftriaxone'),
@@ -220,15 +218,11 @@ dat$Death<-dat$Outcome=='DEAD'
 ```
 There are `r sum(dat$Death==T, na.rm=T)` cases that died. 
 
-### Non-Severe
-**This was taken directly from the table shell footnote:**
-*Criteria for non- severe classification are no fever, bloody diarrhea, and/or presence of hospitalization, bacteremia, or death.*
-
-I'm not sure how to interpret the and/or specification, but I'm going to process this excluding those from the non-severe category since you can't get much more severe than death. This field is going to be mostly NA because Fever, BloodyDiarr and Bacteremia are mostly NA or UNKNOWN.
+### Overall Severity (1+ Severity Classifications)
 ```{r}
-dat$NonSevere<-ifelse(dat$Fever=='YES'|dat$HospClean==T|dat$BloodyDiarr=='YES'|dat$Bacteremia==T|dat$Death==T, F, T)
+dat$Severe<-dat$Fever=='YES'| dat$HospClean==T | dat$BloodyDiarr=='YES'| dat$Bacteremia==T | dat$Death==T
 ```
-There are `r sum(dat$NonSevere==T, na.rm=T)` records that were classified as non-severe. 
+There are `r sum(dat$Severe==T, na.rm=T)` cases were classified as severe. 
 
 # Select Fields for Analysis and Output
 ***
@@ -241,6 +235,6 @@ final<-dat[, ..keep]
 
 ```{r}
 options(scipen=500)
-write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V5.csv", row.names=F)
+write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V6.csv", row.names=F)
 ```
 
