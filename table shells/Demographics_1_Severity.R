@@ -21,43 +21,56 @@ pop<-read.csv("FoodNet Population Data/foodnet_county_population_2004_2019.csv")
 setDT(pop)
 
 pop$AgeStd<-factor(pop$AgeStd, levels=StdAgeCat)
-
+pop$AgeGroup<-factor(
+               ifelse(pop$AgeStd %in% c('25-34','35-44'), '25-44', 
+                 ifelse(pop$AgeStd %in% c('45-54','55-64'), '45-64', 
+                   ifelse(pop$AgeStd %in% c('65-74','75-84', '85+'), '65+', 
+                      as.character(pop$AgeStd)))), 
+               levels=c('0-4', '5-14', '15-24', '25-44', '45-64', '65+'))
+                 
 t1<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=AgeStd]
-t2<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Sex)]
-t3<-pop[Race!='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Race)]
-t4<-pop[Race=='All' & Ethnicity!='All', list(Population=sum(estimate)), by=list(AgeStd, Ethnicity)]
-t5<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, State)]
+t2<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, AgeGroup)]
+t3<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Sex)]
+t4<-pop[Race!='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Race)]
+t5<-pop[Race=='All' & Ethnicity!='All', list(Population=sum(estimate)), by=list(AgeStd, Ethnicity)]
+t6<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, State)]
+t7<-pop[year>2010 & Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=AgeStd]
+
 
 #-------------------------------------------------------------------------------
 #Import shigella case data
 #-------------------------------------------------------------------------------
-dat<-read.csv("FoodNet_NARMS/analytic_file_V5.csv")
+dat<-read.csv("FoodNet_NARMS/analytic_file_V6.csv")
 setDT(dat)
 
 #Classify cases by number of resistance categories
-#-------------------------------------------------------------------------------
 dat$Abx1More<-dat$AbxResSum>=1
 dat$Abx2More<-dat$AbxResSum>=2
 dat$Abx3More<-dat$AbxResSum>=3
 dat$Abx4More<-dat$AbxResSum>=4
+
+#Classify by Age Group
+dat$AgeGroup<-cut(dat$AgeClean, breaks=c(0, 5, 15, 25, 45, 65, 999), right=F, 
+               labels=c('0-4', '5-14', '15-24', '25-44', '45-64', '65+'))
 
 #-------------------------------------------------------------------------------
 #Calculate number of cases by categories and age groups for age-standardization
 #-------------------------------------------------------------------------------
 dat$AgeStd<-cut(dat$AgeClean, breaks=c(0, 5, seq(15, 85, by=10), 999), right=F, labels=StdAgeCat)
 
-cols<-c('NonSevere', 'Fever', 'HospClean', 'BloodyDiarr', 'Bacteremia', 'Death')
 
-Result<-merge(dat[, list(Category='Total', Values='All', Total=.N), by='AgeStd'],
+cols<-c('Severe', 'Fever', 'HospClean', 'BloodyDiarr', 'Bacteremia', 'Death')
+
+Result<-merge(dat[, list(Category='Total', Values='All', Total=.N, NonSevere=sum(Severe==F)), by='AgeStd'],
               dat[, lapply(.SD, function(x) sum(x %in% c("YES", T), na.rm=T)), by='AgeStd', .SDcols=cols],
               by='AgeStd')
 
-varlist<-c('Sex', "Ethnicity", "Race",  "State", 
-           "SpeciesClean", "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', 
+varlist<-c('Sex', "AgeGroup", "Ethnicity", "Race",  "State", 
+           "SpeciesClean", "AmpR", "CipDSC", "CotR", "CipR", 'AxoR', 'AzmR', 
            'Abx1More', 'Abx2More', 'Abx3More', 'Abx4More', 'MDR', 'XDR')
 
 for (i in (varlist)){
-  x<-dat[, list(Category=i, Total=.N) , by=c('AgeStd', eval(i))]
+  x<-dat[, list(Category=i, Total=.N, NonSevere=sum(Severe==F)) , by=c('AgeStd', eval(i))]
   y<-dat[, lapply(.SD, function(x) sum(x %in% c("YES", T), na.rm=T)), by=c('AgeStd', eval(i)), .SDcols=cols]
   z<-merge(x, y, by=c(i, 'AgeStd'))
   setnames(z, i, "Values")
@@ -66,40 +79,47 @@ for (i in (varlist)){
 }
 
 #Drop FALSE and NA for abx resistance categories
-Result<-subset(Result, !(Category %in% varlist[6:16] & Values %in% c(NA, FALSE)))
+Result<-subset(Result, !(Category %in% varlist[7:18] & Values %in% c(NA, FALSE)))
 
 #-------------------------------------------------------------------------------
 # Merge aggregated cases with total population counts for age-adjusted IR 
 # calculation. Note, cases with unknown age are excluded from IR calculation
 #-------------------------------------------------------------------------------
 
-#First, we need to replicate t1 for the 12 categories that are age-adjusted to total population, 
-#then we will format remaining population tables for stacking
+#Replicate t1 for categories that are age-adjusted to total population, then
+#format remaining population tables for stacking
 species<-unique(dat$SpeciesClean)
 
 t1<-do.call("rbind", replicate(12+length(species), t1, simplify = FALSE))
-t1$Category<-c(rep("Total", 10), rep(varlist[6:16], each=10), rep('SpeciesClean', each=10, times=length(species)))
+t1$Category<-c(rep("Total", 10), rep(varlist[c(7:11, 13:18)], each=10), rep('SpeciesClean', each=10, times=length(species)))
 t1$Values<-c(rep("All", 10), rep(TRUE, each=10, times=11), rep(species, each=10))
 
-names(t2)[colnames(t2)=='Sex']<-'Values'
-t2$Category<-'Sex'
+names(t2)[colnames(t2)=='AgeGroup']<-'Values'
+t2$Category<-'AgeGroup'
 
-names(t3)[colnames(t3)=='Race']<-'Values'
-t3$Category<-'Race'
+names(t3)[colnames(t3)=='Sex']<-'Values'
+t3$Category<-'Sex'
 
-names(t4)[colnames(t4)=='Ethnicity']<-'Values'
-t4$Category<-'Ethnicity'
+names(t4)[colnames(t4)=='Race']<-'Values'
+t4$Category<-'Race'
 
-names(t5)[colnames(t5)=='State']<-'Values'
-t5$Category<-'State'
+names(t5)[colnames(t5)=='Ethnicity']<-'Values'
+t5$Category<-'Ethnicity'
 
-t6<-rbind(t1, t2, t3, t4, t5)
+names(t6)[colnames(t6)=='State']<-'Values'
+t6$Category<-'State'
+
+t7$Values<-TRUE
+t7$Category<-'AzmR'
+
+t8<-rbind(t1, t2, t3, t4, t5, t6, t7)
+rm(t1, t2, t3, t4, t5, t6, t7)
 
 #Merge case counts to population table
-ir<-merge(t6, Result, by=c('Category', 'Values', 'AgeStd'), all.x=T)
+ir<-merge(t8, Result, by=c('Category', 'Values', 'AgeStd'), all.x=T)
 
 #Fill in NA values for records that have zero cases in that category
-cols<-c("Total", cols)
+cols<-c("Total", "NonSevere", cols)
 ir[ , c(cols)  := lapply(.SD, nafill, fill=0), .SDcols = cols]
 
 #Calculate incidence rate and confidence limits within each category
@@ -139,14 +159,25 @@ Result<-merge(Result, ir[,..ir.cols], by=c('Category', 'Values'), all=T)
 #Order Columns for output (makes copying and pasting easier) and output
 #-------------------------------------------------------------------------------
 setcolorder(Result, c('Category', 'Values', paste0(rep(cols, each=4), c("", ".Perc", ".adj.rate", ".ci"))))
-Result$Category<-factor(Result$Category, levels=c('Total', 'Sex', 'Ethnicity', 'Race', 'SpeciesClean',
-                                                  'State', "AmpR",  "CotR", "CipR", "AxoR", "AzmR", 
-                                                  "Abx1More","Abx2More","Abx3More","Abx4More", "MDR", "XDR"))
+Result$Category<-factor(Result$Category, 
+                    levels=c('Total', 'Sex', 'AgeGroup', 'Ethnicity', 'Race', 'SpeciesClean',
+                             'State', "AmpR",  "CotR", "CipDSC", "CipR", "AxoR", "AzmR", 
+                             "Abx1More","Abx2More","Abx3More","Abx4More", "MDR", "XDR"))
 
-Result<-Result[order(Category),]
+Result$Values<-as.character(Result$Values)
+setorderv(Result, c('Category', 'Values'))
                     
 setwd('//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Output Datasets For Follow-Up')
-write.xlsx(Result, 'Preliminary Results for Table 1.xlsx')
+write.xlsx(Result, 'Preliminary Results for Table 1_07072022.xlsx')
 
+
+#Median and Range of Age by Severity Category
+dat[, list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
+dat[,list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T))), by='Severe']
+dat[Fever=="YES",list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
+dat[HospClean==T,list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
+dat[BloodyDiarr=='YES',list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
+dat[Bacteremia==T,list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
+dat[Death==T,list(Median=median(AgeClean, na.rm=T), Range=paste(min(AgeClean, na.rm=T), max(AgeClean, na.rm=T)))]
 # End
 #-------------------------------------------------------------------------------
