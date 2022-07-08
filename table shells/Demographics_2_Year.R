@@ -24,9 +24,10 @@ pop$AgeStd<-factor(pop$AgeStd, levels=StdAgeCat)
 
 t1<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Year)]
 t2<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Sex, Year)]
-t3<-pop[Race!='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Race, Year)]
-t4<-pop[Race=='All' & Ethnicity!='All', list(Population=sum(estimate)), by=list(AgeStd, Ethnicity, Year)]
-t5<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, State, Year)]
+t3<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, AgeGroup, Year)]
+t4<-pop[Race!='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, Race, Year)]
+t5<-pop[Race=='All' & Ethnicity!='All', list(Population=sum(estimate)), by=list(AgeStd, Ethnicity, Year)]
+t6<-pop[Race=='All' & Ethnicity=='All', list(Population=sum(estimate)), by=list(AgeStd, State, Year)]
 
 #-------------------------------------------------------------------------------
 #Import shigella case data
@@ -35,11 +36,15 @@ dat<-read.csv("FoodNet_NARMS/analytic_file_V5.csv")
 setDT(dat)
 
 #Classify cases by number of resistance categories
-#-------------------------------------------------------------------------------
 dat$Abx1More<-dat$AbxResSum>=1
 dat$Abx2More<-dat$AbxResSum>=2
 dat$Abx3More<-dat$AbxResSum>=3
 dat$Abx4More<-dat$AbxResSum>=4
+
+#Classify by Age Group
+dat$AgeGroup<-cut(dat$AgeClean, breaks=c(0, 5, 15, 25, 45, 65, 999), right=F, 
+                  labels=c('0-4', '5-14', '15-24', '25-44', '45-64', '65+'))
+dat$AgeGroup<-questionr::addNAstr(dat$AgeGroup, value='U')
 
 #-------------------------------------------------------------------------------
 #Calculate number of cases by categories and age groups for age-standardization
@@ -48,8 +53,8 @@ dat$AgeStd<-cut(dat$AgeClean, breaks=c(0, 5, seq(15, 85, by=10), 999), right=F, 
 
 Result<-dat[, list(Category='Total', Values='All', Total=.N), by=c('Year', 'AgeStd')]
 
-varlist<-c('Sex', "Ethnicity", "Race",  "State", 
-           "SpeciesClean", "AmpR", "CotR", "CipR", 'AxoR', 'AzmR', 
+varlist<-c('Sex', "AgeGroup", "Ethnicity", "Race",  "State", 
+           "SpeciesClean", "AmpR", "CotR", "CipDSC", "CipR", 'AxoR', 'AzmR', 
            'Abx1More', 'Abx2More', 'Abx3More', 'Abx4More', 'MDR', 'XDR')
 
 for (i in varlist) {
@@ -60,37 +65,41 @@ for (i in varlist) {
 }
 
 #Drop NA for abx resistance categories
-Result<-subset(Result, !(Category %in% varlist[6:16] & is.na(Values)))
+Result<-subset(Result, !(Category %in% varlist[7:18] & is.na(Values)))
 
 #-------------------------------------------------------------------------------
 # Merge aggregated cases with population counts for age-adjusted IR calculation. 
 #Note, cases with unknown demographics are excluded from IR calculation
 #-------------------------------------------------------------------------------
-#First, we need to replicate t1 for all categories that are age-adjusted to 
-#total population, then we will format remaining population tables for stacking
-
+# Replicate t1 for all categories that are age-adjusted to total population, then 
+# format remaining population tables for stacking. There are 12 abx resistance 
+# categories, 16 years, 10 standard age categories (16*10=160).
 species<-unique(dat$SpeciesClean)
 
-t1<-do.call("rbind", replicate(12+length(species), t1, simplify = FALSE))
-t1$Category<-c(rep("Total", 160), rep(varlist[6:16], each=160), rep('SpeciesClean', each=160, times=length(species)))
-t1$Values<-c(rep("All", 160), rep(TRUE, times=11*160), rep(species, each=160))
+t1<-do.call("rbind", replicate(13+length(species), t1, simplify = FALSE))
+t1$Category<-c(rep("Total", 160), rep(varlist[7:18], each=160), rep('SpeciesClean', each=160, times=length(species)))
+t1$Values<-c(rep("All", 160), rep(TRUE, times=12*160), rep(species, each=160))
 
 names(t2)[colnames(t2)=='Sex']<-'Values'
 t2$Category<-'Sex'
 
-names(t3)[colnames(t3)=='Race']<-'Values'
-t3$Category<-'Race'
+names(t3)[colnames(t3)=='AgeGroup']<-'Values'
+t3$Category<-'AgeGroup'
 
-names(t4)[colnames(t4)=='Ethnicity']<-'Values'
-t4$Category<-'Ethnicity'
+names(t4)[colnames(t4)=='Race']<-'Values'
+t4$Category<-'Race'
 
-names(t5)[colnames(t5)=='State']<-'Values'
-t5$Category<-'State'
+names(t5)[colnames(t5)=='Ethnicity']<-'Values'
+t5$Category<-'Ethnicity'
 
-t6<-rbind(t1, t2, t3, t4, t5)
+names(t6)[colnames(t6)=='State']<-'Values'
+t6$Category<-'State'
+
+t7<-rbind(t1, t2, t3, t4, t5, t6)
+rm(t1, t2, t3, t4, t5, t6)
 
 #Merge case counts to population table
-ir<-merge(t6, Result, by=c('Category', 'Values', 'Year', 'AgeStd'), all.x=T)
+ir<-merge(t7, Result, by=c('Category', 'Values', 'Year', 'AgeStd'), all.x=T)
 
 #Fill in NA values for records that have zero cases in that category
 ir$Total[is.na(ir$Total)]<-0
@@ -137,14 +146,22 @@ setcolorder(Result, c('Category', 'Values',
             paste0(c("Total_", "Percent_", "adj.rate_", "ci_"), rep(2004:2019, each=4))))
 
 Result$Category<-factor(Result$Category, 
-                        levels=c('Total', 'Sex', 'Ethnicity', 'Race', 'SpeciesClean',
-                                 'State', "AmpR",  "CotR", "CipR", "AxoR", "AzmR", 
+                        levels=c('Total', 'Sex', 'AgeGroup', 'Ethnicity', 'Race', 'SpeciesClean',
+                                 'State', "AmpR",  "CotR", "CipDSC", "CipR", "AxoR", "AzmR", 
                                  "Abx1More","Abx2More","Abx3More","Abx4More", "MDR", "XDR"))
 
-Result<-Result[order(Category),]
+Result$Values<-as.character(Result$Values)
+setorderv(Result, c('Category', 'Values'))
 
 setwd('//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Output Datasets For Follow-Up')
-write.xlsx(Result, 'Preliminary Results for Table 2.xlsx')
+write.xlsx(Result, paste0('Preliminary Results for Table 2', '_',Sys.Date(), '.xlsx'))
+
+#Median and Range of Age by Severity Category
+dat[order(Year), list(Median=median(AgeClean, na.rm=T), 
+           Min=min(AgeClean, na.rm=T), 
+           Max=max(AgeClean, na.rm=T)),
+           by="Year"]
+
 
 # End
 #-------------------------------------------------------------------------------
