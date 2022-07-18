@@ -173,7 +173,8 @@ all$AgeStd<-cut(all$AgeGroup,
 
 all$Sex<-ifelse(all$AgeGroup %in% 3:16, 'M', 'F')
 
-all$Race<-factor(substr(all$variable, 7, 7), levels=tables, labels=c('W', 'B', 'I', 'A', 'P', 'O', 'M', 'All'))
+all$Race<-factor(substr(all$variable, 7, 7), levels=c(LETTERS[seq(from=1, to=7)], 'I'), 
+                 labels=c('W', 'B', 'I', 'A', 'P', 'O', 'M', 'All'))
 
 all$Ethnicity<-ifelse(substr(all$variable, 7, 7)=='I', 'H', 'All')
 
@@ -208,7 +209,7 @@ tl<-subset(tl, !(str_sub(variable, -4, -2) %in% c('001', '002', '026')))
 tl[, variable := str_sub(variable, 1, -2)]
 
 # Pivot combined data set by variable type
-tl<-dcast(tl, GEO_ID + variable + Year ~ Type, value.var = 'value')
+tl<-dcast(tl, GEOID + variable + Year ~ Type, value.var = 'value')
 
 #Extract age groups, sex, race, ethnicity and state from variable field
 tl[, AgeGroup := as.numeric(sub(".*_", "", variable))]
