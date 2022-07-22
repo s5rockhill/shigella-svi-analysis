@@ -1,0 +1,264 @@
+---
+title: "Missing Census Tracts"
+author: "Sarah Rockhill (ppk8@cdc.gov)"
+date: '2022-07-21'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library('openxlsx')
+library('data.table')
+library('kableExtra')
+library('rvest')
+library('ggplot2')
+library('tigris')
+library('viridis')
+library('gridExtra')
+```
+
+```{r import-shigella-data, include=FALSE}
+#Import Shigella cases
+infile.path<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/'
+dat<-setDT(read.csv(paste0(infile.path, 'analytic_file_V6.csv'),stringsAsFactors = F))
+```
+
+```{r import-relationship-file, include=FALSE}
+u = "https://www.census.gov/programs-surveys/geography/technical-documentation/records-layout/2010-census-tract-record-layout.html"
+
+rf_header <- read_html(u) %>%
+              html_nodes("table") %>%
+              .[1] %>%
+               html_table(fill = TRUE)
+
+rf_header<-rf_header[[1]]
+
+rf<-setDT(read.csv('https://www2.census.gov/geo/docs/maps-data/data/rel/trf_txt/us2010trf.txt',
+             col.names = rf_header$`Column Name`,
+             colClasses = c(STATE00='character', COUNTY00='character', TRACT00='character', GEOID00='character',
+                            STATE10='character', COUNTY10='character', TRACT10='character', GEOID10='character')))
+rm(rf_header, u)
+```
+
+```{r get-tigris-files, include=FALSE}
+nm<-states(cb=T) %>% filter_state("New Mexico")
+or<-states(cb=T) %>% filter_state("Oregon")
+
+trnm00<-tracts(state='NM', year=2000, cb=T)
+tror00<-tracts(state='OR', year=2000, cb=T)
+
+trnm10<-tracts(state='NM', year=2010, cb=T)
+tror10<-tracts(state='OR', year=2010, cb=T)
+```
+
+## Number of Shigella Cases with Missing Census Tract Information by Diagnosis Year
+The most critical missing data are 2010 census tracts for cases diagnosed after 2005 and 2000 census
+tracts for cases diagnosed before 2006. 
+```{r table-of-missing-ct, echo=F}
+t1<-dat[order(Year), list(Total_Cases=.N, 
+                          Missing_2000=sum(is.na(CTNO2000)), 
+                          Missing_2010=sum(is.na(CTNO2010))), by='Year']
+
+t1$Missing_2000<-cell_spec(t1$Missing_2000, color = ifelse(t1$Year <2006, "red", "black"), align = "l")
+t1$Missing_2010<-cell_spec(t1$Missing_2010, color = ifelse(t1$Year >2005 & t1$Missing_2010>0, "red", "black"), align = "l")
+
+kbl(t1, escape = F) %>%
+  kable_classic() %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), full_width = F, position = "left", font_size = 13)
+```
+
+## Find 2010 Census Tract Information for `r dat[Year<2006, sum(is.na(CTNO2010))]` Cases with Missing Values Among Cases Diagnosed After 2005
+```{r missingness-by-state, echo=F}
+dat[is.na(CTNO2010) & Year >2005, list(Cases=.N, Unique_Tracts=length(unique(CTNO2000))), by='State']
+mis10<-dat[is.na(CTNO2010) & Year > 2005, .(cases=.N), by=c('CTNO2000', 'State')]
+```
+
+Cases with missing 2010 census tract information are only located within New Mexico and Oregon. We will view the
+the U.S. Census Bureau Census Tract relationship file to evaluate which tracts changed boundaries in 2010 and
+which are relatively consistent over the decennial census period. 
+
+## Tracts with **no** geography boundary changes from 2000 to 2010
+First, let's create a list of tract that had no changes in geography. This might include tract that had name changes, 
+although that is typically rare when the boundary does not change. Name changes in these cases is mostly due to 
+post-enumeration corrections. 
+```{r find-unchanged}
+rf<-subset(rf, GEOID00 %in% mis10$CTNO2000)
+rf[, Records := .N, by='GEOID00']
+unchanged<-rf[PART00=='W' & PART10=='W' & AREAPCT00PT == 100 & POPPCT00 == 100, ]
+```
+There were `r paste(nrow(unchanged), "tracts /", sprintf("%.0f%%", nrow(unchanged)/nrow(mis10)*100))` 
+that had no change in geography from 2000 to 2010. Of these, `r unchanged[GEOID00 != GEOID10, .N]` had a 
+change in name. 
+
+## Tracts with **minimal** geography boundary changes from 2000 to 2010
+For now, we will consider a census tract minimally changed if both the area and population changed less
+than 5% between 2000 and 2010. 
+```{r find-minimally-changed}
+minimal<-rf[AREAPCT00PT > 95 & POPPCT00 >95 &  AREAPCT10PT > 95 & POPPCT10 >95,  ]
+minimal<-minimal[!(GEOID00 %in% unchanged$GEOID00)]
+```
+There were `r paste(nrow(minimal), "tracts /", sprintf("%.0f%%", nrow(minimal)/nrow(mis10)*100))` 
+that had a minimal (<5%) change in geography from 2000 to 2010. Of these, `r minimal[GEOID00 != GEOID10, .N]` had a 
+change in name. 
+
+### Summary statistics on degree of change in minimally changed census tracts
+```{r descriptive-minimal-changed, echo=F}
+temp.vars<-c('Area_Difference', 'Land_Area_Difference', 'Population_Difference', 'Household_Difference')
+temp<-minimal[, c(temp.vars) :=list((AREA10-AREA00)/1000, (AREALAND10-AREALAND00)/1000, POP10-POP00, HU10-HU00)]
+temp<-melt(temp[, 32:35], measure.vars = c(temp.vars), variable.name = "Measure", value.name = "Difference")
+
+ggplot(data=temp, aes(x=Difference, group=Measure, fill=Measure)) +
+    geom_density(adjust=1.5) +
+    theme_light() +
+    facet_wrap(~Measure, scales = "free") +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      axis.ticks.x=element_blank()
+    )
+rm(temp)
+```
+
+## Tracts that were **merged** with neighboring tracts from 2000 to 2010
+These tract substantially changed, however we can easily determine the correct 2010 tract from the 2000 
+tract because the 2000 tract is completely contained within the 2010 tract boundary. 
+```{r finde-merged}
+merged<-rf[PART00=='W' &  PART10=='P' & AREAPCT10PT <=95,  ]
+```
+There were `r paste(nrow(merged), "tracts /", sprintf("%.0f%%", nrow(merged)/nrow(mis10)*100))` 
+that had merged with a neighboring census tract in 2010. Of these, `r merged[GEOID00 != GEOID10, .N]` had a 
+change in name. 
+
+## Tracts that were underwent **major changes** (split or substantially redrawn) from 2000 to 2010
+So far, we have dealt with relatively easy geography changes. There were a combined `r nrow(unchanged)+ nrow(minimal) + nrow(merged)` 2000 census tracts containing 1+ Shigella cases that can be easily converted to 2010 tracts (out of `r nrow(mis10)` census tracts that have one or more Shigella cases and missing 2010 tract information. Among the `r sum(mis10$cases)` Shigella cases diagnosed after 2005 that had a missing 2010 tract value, `r mis10[CTNO2000 %in% c(unchanged$GEOID00, minimal$GEOID00, merged$GEOID00), sum(cases)]` resided in a 2000 census tract that could be easily converted to a 2010 tract. 
+
+```{r find-changed}
+changed<-rf[!(GEOID00 %in% c(unchanged$GEOID00, minimal$GEOID00, merged$GEOID00)),  ]
+```
+
+That leaves `r length(unique(changed$GEOID00))` tracts containing `r mis10[CTNO2000 %in% changed$GEOID00, sum(cases)]` Shigella cases that can't be easily converted to 2010 tracts due to being split and/or substantially redrawn since 2000. For these tracts, we will have to proportionally assign cases to 2010 tracts based on the percent of the original 2000 census tract population contained in the 2010 tract. 
+
+## Number of Shigella Cases with Missing 2010 Census Tract Information by Tract Change Type
+```{r cases-by-tract-change-bar-graph, echo=F}
+mis10$Change<-ifelse(mis10$CTNO2000 %in% unchanged$GEOID00, 'None', 
+                 ifelse(mis10$CTNO2000 %in% minimal$GEOID00, 'Minimal', 
+                   ifelse(mis10$CTNO2000 %in% merged$GEOID00, 'Merged', 
+                     ifelse(mis10$CTNO2000 %in% changed$GEOID00, 'Major', NA))))
+
+temp<-mis10[, list(Tracts=.N, Cases=sum(cases)), by=c('Change', 'State')] 
+temp$Change<-factor(temp$Change, levels=c('None', 'Minimal', 'Merged', 'Major'))
+temp %>%
+  dplyr::arrange(Cases) %>%
+  ggplot(aes(fill=State, x=Change, y=Cases)) +
+  geom_bar(position="dodge", stat="identity") +
+  geom_text(aes(label = Cases), size = 3, vjust = -0.5, position = position_dodge(.9))+
+  scale_fill_viridis_d(option='plasma', begin=0.1, end=0.5) +
+  labs(title = 'Shigella Cases with Missing 2010 Census Tract', 
+       subtitle = 'by 2000 Tract Change Type') +
+  theme_bw()
+rm(temp)
+```
+
+## Maps
+
+```{r merge-tract-polygons-to-missing, include=F}
+trnm00$CTNO2000<-paste0(trnm00$STATE, trnm00$COUNTY, trnm00$TRACT)
+tror00$CTNO2000<-paste0(tror00$STATE, tror00$COUNTY, tror00$TRACT)
+
+trnm00<-merge(trnm00, mis10, by='CTNO2000', all.x=T)
+tror00<-merge(tror00, mis10, by='CTNO2000', all.x=T)
+
+trnm00$Change[is.na(trnm00$Change)]<-'No cases'
+tror00$Change[is.na(tror00$Change)]<-'No cases'
+
+trnm00$cases[is.na(trnm00$cases)]<-0
+tror00$cases[is.na(tror00$cases)]<-0
+```
+
+### 2000 Tracts by Change Type
+
+Most of these tracts have changes too small to view as a choropleth. I'm going to add in a 
+leaflet map so you can zoom in over a base map later. 
+```{r map-tract-change-type, echo=FALSE}
+p1<-
+ggplot() + 
+  geom_sf(data=nm) + 
+  geom_sf(data=trnm00, aes(fill = Change), color = "black") + 
+  scale_fill_viridis_d(option="plasma")+
+  labs(title="2000 New Mexico Census Tracts by 2010 Decenniel Change")+
+  theme_void()
+
+p2<-
+ggplot() + 
+  geom_sf(data=or) + 
+  geom_sf(data=tror00, aes(fill = Change), color = "black") + 
+  scale_fill_viridis_d(option="plasma")+
+  labs(title="2000 Oregon Census Tracts by 2010 Decenniel Change")+
+  theme_void()
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+### Number of Shigella Cases by Tract by Tract Change Type
+```{r map-unchanged-tracts, echo=F}
+p3<-ggplot() + 
+  geom_sf(data=nm) + 
+  geom_sf(data=trnm00, fill = NA, color = "black") + 
+  geom_sf(data=trnm00[trnm00$Change=='None',], aes(fill = cases), color = "white") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title= "New Mexico, 2000 - 2010")+
+  theme_void()
+
+p4<-ggplot() + 
+  geom_sf(data=or) + 
+  geom_sf(data=tror00, fill = NA, color = "black") + 
+  geom_sf(data=tror00[tror00$Change=='None',], aes(fill = cases), color = "white") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title= "Oregon, 2000 - 2010")+
+  theme_void()
+
+grid.arrange(p3, p4, nrow=1,  top="Shigella Cases in Unchanged Census Tracts")
+```
+
+```{r map-minimal-tracts, echo=F}
+p5<-ggplot() + 
+  geom_sf(data=nm) + 
+  geom_sf(data=trnm00, fill = NA, color = "black") + 
+  geom_sf(data=trnm00[trnm00$Change %in% c('Minimal', 'Merged'),], aes(fill = cases), color = "black") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title= "New Mexico, 2000 - 2010")+
+  theme_void()
+
+p6<-ggplot() + 
+  geom_sf(data=or) + 
+  geom_sf(data=tror00, fill = NA, color = "black") + 
+  geom_sf(data=tror00[tror00$Change %in% c('Minimal', 'Merged'),], aes(fill = cases), color = "black") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title= "Oregon, 2000 - 2010")+
+  theme_void()
+
+grid.arrange(p5, p6, nrow=1,  top="Shigella Cases in Minimally-Changed or Merged Census Tracts")
+```
+
+
+```{r map-major-tracts, echo=F}
+p7<-ggplot() + 
+  geom_sf(data=nm) + 
+  geom_sf(data=trnm00, fill = NA, color = "black") + 
+  geom_sf(data=trnm00[trnm00$Change=='Major',], aes(fill = cases), color = "black") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title= "New Mexico, 2000 - 2010")+
+  theme_void()
+
+p8<-ggplot() + 
+  geom_sf(data=or) + 
+  geom_sf(data=tror00, fill = NA, color = "black") + 
+  geom_sf(data=tror00[tror00$Change=='Major',], aes(fill = cases), color = "black") + 
+  scale_fill_viridis(option="plasma")+
+  labs(title = "Oregon, 2000 - 2010")+
+  theme_void()
+
+grid.arrange(p7, p8, nrow=1,  top="Shigella Cases in Census Tracts that Underwent Major Changes")
+```
