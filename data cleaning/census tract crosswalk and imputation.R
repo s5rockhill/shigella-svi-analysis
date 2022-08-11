@@ -76,6 +76,7 @@ dtlist<-split(dat, by='MissCT')
 #highest population weight
 #---------------------------------------------------------------------------------
 dtm<-dtlist[["TRUE"]]
+dtm<-dtm[, c('ID', 'CTNO2000', 'CTNO2010', 'Year', 'State')]
 
 #Find the census tract that contains the largest % of the known CT population
 rf[, Largest10Part := (POPPCT00==max(POPPCT00)), by='CTNO2000']
@@ -99,6 +100,7 @@ dtm[, list(AvgPer2000Pop=mean(POPPCT00, na.rm=T), AvgPer2010Pop=mean(POPPCT10, n
 #weighted probability
 #---------------------------------------------------------------------------------
 stc<-dtlist[["TRUE"]]
+stc<-stc[, c('ID', 'CTNO2000', 'CTNO2010', 'Year', 'State')]
 
 #Generate random number between 0 and 1 for each case 
 set.seed(1)
@@ -107,7 +109,7 @@ stc[, randoms := round(runif(nrow(stc), min = 0, max = 1), digits=3)]
 #Calculate the cumulative % 2000 population contained in 2010 CT part
 rf<-rf[order(CTNO2000, -POPPCT00), ]
 rf[, CPropMax00 := round(cumsum(POP10PT/POP00), 3), by='CTNO2000']
-rf[, CPropMin00 := c(0, CPropMax[-.N]+0.001), by='CTNO2000']
+rf[, CPropMin00 := c(0, CPropMax00[-.N]+0.001), by='CTNO2000']
 
 #Average number of 2010 candidates per 2000 tract
 rf[CTNO2000 %in% stc$CTNO2000, length(unique(CTNO2010)), by='CTNO2000'][, mean(V1)]
@@ -142,12 +144,17 @@ stc[, list(AvgPer2000Pop=mean(POPPCT00, na.rm=T), AvgPer2010Pop=mean(POPPCT10, n
 #---------------------------------------------------------------------------------
 results<-merge(dtm, stc, by='ID')
 
+#Average percent of the original population contained within the imputed boundary by method
+temp1<-results[, list(Dtm_2000_Population_Mean=mean(POPPCT00.x, na.rm=T), 
+                      Dtm_2010_Population_Mean=mean(POPPCT10.x, na.rm=T),
+                      Stc_2000_Population_Mean=mean(POPPCT00.y, na.rm=T), 
+                      Stc_2010_Population_Mean=mean(POPPCT10.y, na.rm=T)) ]
+
 #Cases assigned to the same imputed tract in both methodologies by Year
-results[order(Year), list(sum(Deterministic==Stochastic, na.rm=T)/.N), by='Year']
+temp2<-results[, list(Same_Result=sum(Deterministic==Stochastic, na.rm=T)/.N), by="Year"]
 
 #Cases assigned to the same imputed tract in both methodologies by State
-results[, list(sum(Deterministic==Stochastic, na.rm=T)/.N), by=str_sub(Deterministic, 1, 2)]
-
+temp3<-results[, list(Same_Result=sum(Deterministic==Stochastic, na.rm=T)/.N), by='State']
 
 ##################################################################################
 #Rerun analysis on cases with known CT values for both years to estimate accuracy
@@ -186,16 +193,33 @@ smp<-smp[randoms>=CPropMin10 & randoms<=CPropMax10, ]
 
 #Percent of cases assigned to correct CT by method
 #---------------------------------------------------------------------------------
-smp[, list(Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
+temp4<-rbind(
+smp[, list(State="All", Cases=.N,
+           Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
            Stochastic_2010=sum(Stochastic_10==CTNO2010)/.N, 
            Deterministic_2000=sum(Deterministic_00==CTNO2000)/.N, 
-           Stochastic_2000=sum(Stochastic_00==CTNO2000)/.N)]
+           Stochastic_2000=sum(Stochastic_00==CTNO2000)/.N)],
 
-smp[, list(Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
+smp[, list(Cases=.N,
+           Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
            Stochastic_2010=sum(Stochastic_10==CTNO2010)/.N, 
            Deterministic_2000=sum(Deterministic_00==CTNO2000)/.N, 
            Stochastic_2000=sum(Stochastic_00==CTNO2000)/.N), by='State']
+)
+################################################################################
+#Output results
+result_list<-list("Percent of Pop in Imputed Tract"=temp1, 
+                  "Percent Same Result by Year"=temp2,
+                  "Percent Same Result by State"=temp3,
+                  "Accuracy Estimation by State"=temp4)
 
+write.xlsx(result_list, file="//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Preliminary Results/Impution Results.xlsx")
+
+#Merge imputed tracts with original dataset and output 
+dat$MissCT<-NULL
+dat<-merge(dat, results[, c('ID', 'Deterministic', 'Stochastic')], by='ID', all.x=T)
+options(scipen=500)
+write.csv(dat, "analytic_file_V7.csv", row.names=F)
 ################################################################################
 # END
 
