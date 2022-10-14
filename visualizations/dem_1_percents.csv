@@ -1,0 +1,99 @@
+Category,Values,Type,Cases,Percent
+Total,All,Non-severe,17205,50.8
+Sex,F,Non-severe,8497,54.1
+Sex,M,Non-severe,8646,47.9
+Sex,U,Non-severe,62,63.9
+AgeGroup,0-4,Non-severe,4781,58.6
+AgeGroup,5-14,Non-severe,4646,55
+AgeGroup,15-24,Non-severe,1297,48.8
+AgeGroup,25-44,Non-severe,3595,45.2
+AgeGroup,45-64,Non-severe,2162,43.5
+AgeGroup,65+,Non-severe,654,42.8
+AgeGroup,U,Non-severe,70,48.3
+Ethnicity,H,Non-severe,2642,44.4
+Ethnicity,N,Non-severe,9867,46.6
+Ethnicity,U,Non-severe,4696,69.8
+Race,Asian,Non-severe,403,47.2
+Race,Black,Non-severe,3709,45.2
+Race,AIAN,Non-severe,262,58
+Race,Multiracial,Non-severe,145,37.8
+Race,Other,Non-severe,752,45.1
+Race,NHPI,Non-severe,21,29.2
+Race,Uknown,Non-severe,3462,70.2
+Race,White,Non-severe,8451,48.9
+Species,boydii,Non-severe,130,59.4
+Species,dysenteriae,Non-severe,41,61.2
+Species,flexneri,Non-severe,2199,39.7
+Species,sonnei,Non-severe,12077,54.5
+Species,unknown,Non-severe,2758,47
+State,CA,Non-severe,2229,49.5
+State,CO,Non-severe,766,48.6
+State,CT,Non-severe,561,55.2
+State,GA,Non-severe,5078,47.1
+State,MD,Non-severe,1129,46.7
+State,MN,Non-severe,1423,44.6
+State,NM,Non-severe,879,51.8
+State,NY,Non-severe,583,46.1
+State,OR,Non-severe,509,41.3
+State,TN,Non-severe,4048,65.5
+Resistant to,AmpR,Non-severe,240,55.7
+Resistant to,CotR,Non-severe,177,45.7
+Resistant to,CipDSC,Non-severe,17,45.9
+Resistant to,CipR,Non-severe,11,37.9
+Resistant to,AxoR,Non-severe,3,37.5
+Resistant to,AzmR,Non-severe,15,25.9
+Antibiotic Resistance,1 or more,Non-severe,316,52.1
+Antibiotic Resistance,2 or more,Non-severe,111,46.4
+Antibiotic Resistance,3 or more,Non-severe,16,29.6
+Antibiotic Resistance,4 or more,Non-severe,3,23.1
+Antibiotic Resistance,MDR,Non-severe,3,33.3
+Antibiotic Resistance,XDR,Non-severe,0,0
+Total,All,Severe,16660,49.2
+Sex,F,Severe,7210,45.9
+Sex,M,Severe,9415,52.1
+Sex,U,Severe,35,36.1
+AgeGroup,0-4,Severe,3379,41.4
+AgeGroup,5-14,Severe,3808,45
+AgeGroup,15-24,Severe,1360,51.2
+AgeGroup,25-44,Severe,4359,54.8
+AgeGroup,45-64,Severe,2806,56.5
+AgeGroup,65+,Severe,873,57.2
+AgeGroup,U,Severe,75,51.7
+Ethnicity,H,Severe,3308,55.6
+Ethnicity,N,Severe,11318,53.4
+Ethnicity,U,Severe,2034,30.2
+Race,Asian,Severe,450,52.8
+Race,Black,Severe,4498,54.8
+Race,AIAN,Severe,190,42
+Race,Multiracial,Severe,239,62.2
+Race,Other,Severe,914,54.9
+Race,NHPI,Severe,51,70.8
+Race,Uknown,Severe,1472,29.8
+Race,White,Severe,8846,51.1
+Species,boydii,Severe,89,40.6
+Species,dysenteriae,Severe,26,38.8
+Species,flexneri,Severe,3338,60.3
+Species,sonnei,Severe,10100,45.5
+Species,unknown,Severe,3107,53
+State,CA,Severe,2274,50.5
+State,CO,Severe,809,51.4
+State,CT,Severe,455,44.8
+State,GA,Severe,5703,52.9
+State,MD,Severe,1290,53.3
+State,MN,Severe,1771,55.4
+State,NM,Severe,819,48.2
+State,NY,Severe,682,53.9
+State,OR,Severe,723,58.7
+State,TN,Severe,2134,34.5
+Resistant to,AmpR,Severe,191,44.3
+Resistant to,CotR,Severe,210,54.3
+Resistant to,CipDSC,Severe,20,54.1
+Resistant to,CipR,Severe,18,62.1
+Resistant to,AxoR,Severe,5,62.5
+Resistant to,AzmR,Severe,43,74.1
+Antibiotic Resistance,1 or more,Severe,290,47.9
+Antibiotic Resistance,2 or more,Severe,128,53.6
+Antibiotic Resistance,3 or more,Severe,38,70.4
+Antibiotic Resistance,4 or more,Severe,10,76.9
+Antibiotic Resistance,MDR,Severe,6,66.7
+Antibiotic Resistance,XDR,Severe,1,100
