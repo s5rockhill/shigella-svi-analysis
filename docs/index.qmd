@@ -28,7 +28,7 @@ PercentsFiltered = percents.filter(function(percents) {
 
 ```{r, warning=F, echo=F}
 require(data.table)
-trends <-setDT(read.csv('C:/Users/ppk8/OneDrive - CDC/Training and Guildes/Quarto/dem_2_trends.csv', stringsAsFactors = F))
+trends <-setDT(read.csv('dem_2_trends.csv', stringsAsFactors = F))
 trends<-melt(trends, 
                id.vars=c("Category", "Values", "Year"),
                measure.vars=c("Cases", "Percent", "Adjusted.Rate"),
