@@ -1,0 +1,179 @@
+---
+title: "Shigella Cases by Serverity and Demographic Characteristics"
+author: "Sarah Rockhill"
+project:
+  type: website
+  output-dir: docs
+format: 
+  html: 
+    echo: false
+    page-layout: full
+    toc: true
+---
+
+These data include Shigella cases within the FoodNet Surveillance area that were diagnosed from 2004 through 2019. Cases with an unknown census tract of residence were excluded. Criteria for severe classification are presence of one or more of the following: fever, bloody diarrhea, hospitalization, bacteremia, or death.
+
+```{ojs}
+//| echo: false
+data = FileAttachment("dem_1_data.csv").csv()
+filtered = data.filter(function(rates) {
+  return dem_cat.includes(rates.Category);
+})
+
+percents = FileAttachment("dem_1_percents.csv").csv({typed: true})
+PercentsFiltered = percents.filter(function(percents) {
+  return dem_cat.includes(percents.Category);
+})
+```
+
+```{r, warning=F, echo=F}
+require(data.table)
+trends <-setDT(read.csv('C:/Users/ppk8/OneDrive - CDC/Training and Guildes/Quarto/dem_2_trends.csv', stringsAsFactors = F))
+trends<-melt(trends, 
+               id.vars=c("Category", "Values", "Year"),
+               measure.vars=c("Cases", "Percent", "Adjusted.Rate"),
+               variable.name="Type",
+               value.name="Statistic")
+
+ojs_define(dat=trends)
+```
+
+```{ojs}
+//| echo: false
+trendsFiltered = transpose(dat).filter(function(trends) {
+    return dem_cat.includes(trends.Category) &&
+    type_cat.includes(trends.Type);
+})
+```
+
+## Select Demographic Category
+
+```{ojs}
+//| echo: false
+//| panel: input
+viewof dem_cat = Inputs.select(
+  [ "Total",
+    "Sex",
+    "AgeGroup",
+    "Ethnicity",
+    "Race",
+    "Species",
+    "State",
+    "Resistant to",
+    "Antibiotic Resistance"
+  ], 
+  {value: ["Total"], label: html`<b>Demographic category</b>`}
+)
+```
+
+### Shigella Cases by Severity
+
+::: {layout="[ [2,1] ]"}
+#### Age-Adjusted Rates
+
+```{ojs}
+//| echo: false
+Plot.plot({
+  marginLeft: 100,
+  height: 375,
+  width: 1000,
+  grid: true,
+  
+  style: {
+    fontFamily: "sans-serif",
+    fontSize: "12px"
+  },
+  
+  x: {
+    grid: true,
+    label: "Age-adjusted rate per 100K"},
+  
+  y: {
+    label: null
+  },
+  
+  facet: {
+    data: filtered,
+    y: "Type",
+    marginRight: 90
+  },
+  
+  fy: {
+  label: null
+  },
+  
+  marks: [
+    Plot.frame(),
+    Plot.barX(filtered, {x: "Rate", y: "Values", fill: "Values"}),
+    Plot.ruleX([0])
+  ]
+})
+```
+
+#### Percent of Cases
+
+```{ojs}
+//| echo: false
+Plot.plot({
+  height: 200,
+  color: {
+    legend: true
+  },
+  y : {tickFormat: "s"},
+  marks: [
+    Plot.barY(PercentsFiltered, {
+      x: "Values",
+      y: "Percent",
+      fill: "Type"
+    }),
+    Plot.ruleY([0])
+  ]
+})
+```
+:::
+
+### Shigella Incidence Trends
+
+```{ojs}
+//| echo: false
+//| panel: input
+viewof type_cat = Inputs.radio(
+  ["Adjusted.Rate", "Cases", "Percent"], 
+  {value: "Adjusted.Rate", label: html`<b>Select statistic</b>`}
+)
+```
+
+```{ojs}
+//| echo: false
+Plot.plot({
+  style: "overflow: visible;",
+  marginRight: 40,
+  height: 400,
+  width: 1000,
+  color: {
+    legend: true
+    },
+    
+   y: {grid: true,
+       label: "Type"},
+
+  marks: [
+    Plot.ruleY([0]), // freezing
+    Plot.line(trendsFiltered, {
+        x: "Year", 
+        y: "Statistic", 
+        stroke: "Values",
+        marker: "circle"
+        }),
+    Plot.text(trendsFiltered, Plot.selectLast({
+        x: "Year",
+        y: "Statistic",
+        z: "Values",
+        text: "Values",
+        textAnchor: "Year",
+        dx: 10
+      }))
+      
+      ]
+})
+```
