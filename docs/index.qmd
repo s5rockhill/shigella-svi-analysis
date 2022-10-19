@@ -177,3 +177,77 @@ Plot.plot({
       ]
 })
 ```
+
+## Shigella Incidence by State
+```{ojs}
+//| echo: false
+//| panel: input
+viewof map_cat = Inputs.radio(
+  ["Adjusted.Rate", "Cases", "Percent"], 
+  {value: "Adjusted.Rate", label: html`<b>Select statistic</b>`}
+)
+
+viewof map_year = Inputs.range(
+  [2004, 2019], 
+  {value: 2004, step: 1, label: html`<b>Year</b>`}
+)
+```
+
+```{r, echo=F}
+#Format data for mapping
+library('tidycensus')
+names(fips_codes)[names(fips_codes)=='state_code']<-'id'
+stFips<-unique(fips_codes[, c('state', 'id')])
+
+stateData<-merge(trends[Category=='State',], stFips, by.x='Values', by.y='state', all.x=T)
+setnames(stateData, 'Statistic', 'value')
+
+ojs_define(mapdat=stateData)
+```
+
+```{ojs}
+//| echo: false
+mapFiltered = transpose(mapdat).filter(function(stateData) {
+    return map_cat.includes(stateData.Type) &&
+           map_year == stateData.Year;
+})
+
+maxdomain = d3.max(mapFiltered, d => d.value)
+
+```
+
+```{ojs}
+d3 = require("d3@6")
+import { drawChoroplethMap } from "@clhenrick/reusable-choropleth-map"
+import {Legend} from "@d3/color-legend"
+```
+
+```{ojs}
+Legend(d3.scaleQuantize([0, maxdomain], d3.schemeYlGnBu[5]), {
+  title: "Quintile"
+})
+```
+
+
+```{ojs}
+colorScale = d3
+  .scaleQuantize()
+  .domain([0, maxdomain])
+  .range(d3.schemeYlGnBu[5])
+  
+tooltipContents = datum => {
+  const {value } = datum;
+  return `${value}`;
+}
+  
+testWithStatesData = drawChoroplethMap({
+  data: mapFiltered,
+  colorScale,
+  tooltipContents,
+  adminLevel: "states",
+  zoomEnabled: false
+})
+```
+
+
+
