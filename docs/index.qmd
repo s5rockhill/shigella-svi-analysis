@@ -249,5 +249,67 @@ testWithStatesData = drawChoroplethMap({
 })
 ```
 
+## Ratio Ratios by Category
+**Comparing Rates in Most Vulnerable Quartile to Least Vulnerable**
 
+*A rate ratio fo 1.0 signifies no association. Rate ratios with confidence intervals that do not overlap 1.0 are considered
+statistically significant.*
+
+```{r, echo=F}
+ratios <-fread('dem_3_ratios.csv', select = c('Group', 'Values', 'RateRatio', 'RRci'))
+ratios<-ratios[,  c('lci', 'uci', 'RRci') :=  
+                 list(as.numeric(gsub( '[(]| -.*?)', "", RRci)), as.numeric(gsub( '.*-|[)]', "",  RRci)), NULL)]
+
+#ratios<-melt(ratios, 
+#               id.vars=c("Group", "Values"),
+#                measure.vars=c("RateRatio", "lci", "uci"),
+#                variable.name="Type",
+#               value.name="Statistic")
+                            
+ojs_define(ratiodat = ratios)
+```
+
+```{ojs}
+ratioFiltered = transpose(ratiodat).filter(function(ratios) {
+    return ratio_cat.includes(ratios.Group)
+})
+
+viewof ratio_cat = Inputs.select(
+  [ "Total",
+    "Sex",
+    "AgeGroup",
+    "Ethnicity",
+    "Race",
+    "Species",
+    "Urban-Rural Status",
+    "Severity",
+    "State",
+    "Resistant to",
+    "Antibiotic Resistance"
+  ], 
+  {value: ["Total"], label: html`<b>Demographic category</b>`}
+)
+```
+
+
+```{ojs}
+Plot.plot({
+  x: {
+    label: 'Rate Ratio',
+    tickSize: 0
+  },
+  
+  y: {
+    label: null
+  },
+  
+  marks: [
+    Plot.ruleX([0]),
+    Plot.ruleX([1], {stroke: "gray"}),
+    Plot.ruleY(ratioFiltered, {x1: "lci", x2: "uci", y: "Values",  
+                              stroke: "Values", strokeWidth: 4, strokeLinecap: "round"}),
+    Plot.dot(ratioFiltered, {x: "RateRatio", y: "Values", fill: "Values", r: 6})
+  ]
+})
+```
 
