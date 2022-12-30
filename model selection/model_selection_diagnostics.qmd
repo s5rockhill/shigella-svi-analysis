@@ -1,0 +1,255 @@
+---
+title: "model_selection_diagnostics"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+toc: true
+---
+
+## Libraries
+
+```{r}
+#| warning: false
+library('glmmTMB')
+library('MASS')
+library('bbmle')
+library('ggplot2')
+library('ggthemes')
+library('data.table')
+library('DHARMa')
+library('tidyverse')
+library('kableExtra')
+```
+
+# Import data
+
+```{r}
+#| warning: false
+setwd("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/")
+race<-setDT(read.csv("Final_Aggregate_ByRace_2022-12-28.csv"))
+```
+
+# Data characteristics
+
+The final dataset includes a row for each unique combination of census tract, time period, age group, sex, and race. The outcome variable, **Cases**, is the aggregate number of cases for that combination. The **Pop** variable corresponds to the underlying population total in that category. Because population data was not available for cross-tabluations of race and ethnicity, race and ethnicity case and population totals have been calculated separately (each race category includes both Hispanic and non-Hispanic categories. Records have been merged with the SVI data that most closely corresponds to the year of diagnosis and with the NCHS urban-rural classification codes.
+
+```{r}
+head(race)
+```
+
+## Data Preparation
+
+Because census tract ID's are reused between versions, we need to qualify the census tract id number by census tract version.
+
+```{r}
+race[,GEOID := ifelse(sviyear==2000, paste0('2000', GEOID), paste0('2010', GEOID))]
+```
+
+Factor covariates and set desired reference category.
+
+```{r}
+race[, c('Race', 'UrCode', 'quartile') := list(
+  
+            factor(Race, levels=c('W', 'B', 'A', 'I', 'P', 'M', 'O'),
+                         labels=c('White', 'Black', 'Asian', 'Native American', 
+                               'Pacific Islander', 'Multiracial', 'Other')),
+            
+            factor(UrCode, levels=c('lrg central metro', 'lrg fringe metro', 'med metor',                                     'sml metro', 'micropolitan', 'non-core')),
+            
+            factor(quartile, levels=1:4))]
+```
+
+## Data quality checks
+
+**Number of records with more cases than population by race**
+```{r}
+kbl(race[Cases>Pop, .N, by=c('Race')]) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+```
+
+**Percent of records with zero cases**
+```{r}
+temp<-race[, list(Percent_with_no_cases = sum(Cases==0)/.N), 
+                 by=list(AgeGroup, Sex, sviyear, Race)]
+
+summary(temp$Percent_with_no_cases)
+```
+
+There are **`r race[Cases>Pop, .N]`** records with more cases than population. This may be due to sampling error in the population data, which is sourced from the ACS for sviyears after 2005. Additionally, the average number of tracts without any cases for a specific category combination is **`r mean(temp$Percent_with_no_cases)`**.
+
+## Ratio of variance to mean of cases by race, sex, and year
+
+```{r}
+kbl(dcast(Race + Sex ~ sviyear, value.var = 'Ratio',
+          data=race[,  list(Ratio=round(var(Cases)/mean(Cases), 3)), 
+                       by = c('Race', 'Sex', 'sviyear')]))  %>%
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Visualize distribution of number of cases for census tract for all race groups
+
+These plots shows distribution of tracts by number of cases for each race and ethnicity category for all years, age groups and sex combined.
+
+```{r}
+ggplot(race[, list(Cases=sum(Cases)), by=list(GEOID, Race)], 
+       aes(x=Cases)) +
+  facet_grid(.~Race)+
+  geom_histogram(position="identity", bins=10, fill='#D23E43', color='black')+
+  theme_light()
+```
+
+------------------------------------------------------------------------
+
+# Analysis Part 1
+
+**Original Research Objective:** Are there residual effects of race on the incidence of Shigella after controlling for SVI?
+
+**Alternate Research Objective:** Does the impact of SVI on Shigella incidence vary by race?
+
+**Primary outcome:** New cases of Shigella, offset by population
+
+**Primary predictor:** SVI quartile
+
+**Additional covariates:** Sex, age group, year (grouped by svi version)
+
+------------------------------------------------------------------------
+
+I have records with zero population so including population counts as an offset (i.e., log(0)=-inf error). Therefore, I'm dropping zero population counts and including the log of pop as an offset.
+
+```{r}
+race<-race[Pop>0 & Cases <= Pop & !is.na(Race), ]
+```
+
+## Visualize bivariate associations
+
+**Shigella Rate per 100K by SVI Quartile and Race among Tracts One or More Cases**
+
+```{r}
+ggplot(race[Cases>0 &!is.na(quartile),],aes(x=factor(quartile),y=Cases/Pop*100000, color=Race))+
+  facet_wrap(~Race, scales='free')+
+  stat_summary(fun.data=mean_cl_boot,size=1)+
+  scale_color_calc()+
+  theme_bw()+
+  theme(legend.position = 'none')
+```
+
+**Log(Shigella Rate per 100K) by SVI Score among Tracts One or More Cases by Age and Sex for Each Race Category**
+
+```{r}
+#| warning: false
+plots <- race %>%
+  filter(Cases>0) %>%
+  split(.$Race) %>%
+  map(~ggplot(.x, aes(RPL_THEMES, log(Cases/Pop*100000))) +
+      facet_grid(cols=vars(AgeGroup), rows=vars(Sex), scales='free')+
+      geom_point()+
+      stat_sum(alpha=0.5) + ## show overlapping/replicated points as circles (semi-transparent)
+      scale_size(range=c(2,8)) + ## cosmetic: make minimum size (non-replicated) points larger  
+      ## fit and display a flexible smooth curve for point data
+      geom_smooth(method="gam",method.args=list(family="quasipoisson"))
+  )
+```
+
+
+::: {.panel-tabset}
+```{r}
+#| fig-width: 12
+#| fig-height: 8
+#| results: asis
+#| warning: false
+
+iwalk(plots, ~ {
+  cat('## ', .y, '\n\n')
+  
+  print(.x)
+  
+  cat('\n\n')
+  
+})
+```
+
+:::
+
+## Hurdle Model Comparison
+
+The original analysis plan calls for models stratified by race. For brevity, I am testing models on the reference race category (White). These models and the simulated residuals take a long time to run, so I'll only run the final model on all race categories.
+
+------------------------------------------------------------------------
+
+```{r}
+datlist<-race %>% split(.$Race)
+```
+
+Create list of hurdle poisson and hurdle negative binomial models to compare fit. Each model includes the log of population as an offset term and a random intercept for the unique tract in the conditional portion of the model. Different covariates are evaluated in both the conditional and the zero-inflation (binomial) portion of the model.
+
+```{r}
+#| warning: false
+#Truncated Poisson Distribution 
+
+#Null model
+m0<-glmmTMB(Cases ~ offset(log(Pop)) + (1|GEOID), zi= ~1, family=truncated_poisson, data=datlist$White)
+m1<-update(m0, Cases ~ quartile + offset(log(Pop)) + (1|GEOID))
+m2<-update(m1, Cases ~ quartile + sviyear + offset(log(Pop)) + (1|GEOID))
+m3<-update(m2, Cases ~ quartile + sviyear + Sex + offset(log(Pop)) + (1|GEOID))
+m4<-update(m3, Cases ~ quartile + sviyear + Sex + AgeGroup + offset(log(Pop)) + (1|GEOID))
+m5<-update(m4, ziformula=~quartile + sviyear + Sex + AgeGroup)
+m6<-update(m5, ziformula=~.)
+
+#Truncated negative binomial distribution
+m7<-update(m0, family=truncated_nbinom2)
+m8<-update(m1, family=truncated_nbinom2)
+m9<-update(m2, family=truncated_nbinom2)
+m10<-update(m3, family=truncated_nbinom2)
+m11<-update(m4, family=truncated_nbinom2)
+m12<-update(m5, family=truncated_nbinom2)
+m13<-update(m6, family=truncated_nbinom2)
+```
+
+**Compare model information**
+
+```{r}
+models<-list(m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13)
+model_specs<-data.frame()
+
+for (i in 1:length(models)){
+  model_specs[i, 1]<-as.character(models[[i]]$call)[2]
+  model_specs[i, 2]<- as.character(models[[i]]$modelInfo$allForm$ziformula)[[2]]
+  model_specs[i, 3]<-as.character(models[[i]]$call)[4]
+  model_specs[i, 4]<-AIC(models[[i]])
+  model_specs[i, 5]<-ifelse(models[[i]]$fit$convergence==0, 'Yes', 'No')
+  model_specs[i, 6]<-length(models[[i]]$fit$par)
+  model_specs[i, 7]<-sigma(models[[i]])
+}
+
+colnames(model_specs)<-c('Conditional Formula', 'ZI Formula', 'Distribution', 
+                         'AIC', 'Covergence', 'DF', 'Dispersion Parameter')
+
+model_specs %>%
+  kbl() %>%
+  kable_material(c("striped"))
+```
+
+Extract model with best overall fit
+```{r}
+final_mod<-models[[which.min(sapply(1:length(models),function(x)AIC(models[[x]])))]]
+```
+
+**Visualize simulated residuals from best fit model.** This takes \> 15 min
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = final_mod, n = 1000) 
+plot(simulationOutput)
+testDispersion(simulationOutput = simulationOutput, alternative ="less")
+testUniformity(simulationOutput = simulationOutput, )
+```
+
+```{r}
+
+#Predicted probabilities (p=p.1*(1-p.2))
+#--------------------------------------------------------------------
+p<-predict(m9, type='response')
+p.1<-predict(m9, type='conditional')
+p.2<-predict(m9, type='zprob')
+```
