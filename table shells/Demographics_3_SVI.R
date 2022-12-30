@@ -136,6 +136,8 @@ dat[, c('Fever', 'BloodyDiarr'):= list(ifelse(Fever=='YES', T, F), ifelse(Bloody
 dat[is.na(CTNO2000), CTNO2000 := Deterministic]
 dat[is.na(CTNO2010), CTNO2010 := Deterministic]
 
+dat$CTNO2000<-str_pad(dat$CTNO2000, width=11, side='left', pad='0')
+
 #-------------------------------------------------------------------------------
 #Sum cases by demographic categories for rate calculation
 #-------------------------------------------------------------------------------
