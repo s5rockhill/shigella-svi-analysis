@@ -1,0 +1,713 @@
+---
+title: "model_selection_diagnostics"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+toc: true
+---
+
+## Evaluation of Social Vulnerability Impact on Shigella Incidence and Racial Disparities
+
+**Original Research Objective:** Are there residual effects of race on the incidence of Shigella after controlling for SVI?
+
+**Alternate Research Objective:** Does the impact of SVI on Shigella incidence vary by race?
+
+**Primary outcome:** New cases of Shigella, offset by population
+
+**Primary predictor:** SVI quartile
+
+**Additional covariates:** Age group, year (grouped by svi version), Urban-rural status
+
+## Libraries
+
+```{r}
+#| warning: false
+library('glmmTMB')
+library('lme4')
+library('ggplot2')
+library('ggthemes')
+library('data.table')
+library('DHARMa')
+library('tidyverse')
+library('kableExtra')
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#Import census tract dataset
+setwd("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/")
+dat<-setDT(read.csv("Final_Aggregate_ByRace_2023-01-18.csv", 
+                    colClasses = c('GEOID'='character', 'County'='character')))
+
+#Import county dataset
+cntydat<-setDT(read.csv("Final_County_ByRace_2023-02-09.csv", colClasses = c('County'='character')))
+```
+
+# Data Characteristics
+
+The census tract dataset includes a row for each unique combination of census tract, time period, age group, sex, and race. The outcome variable, **Cases**, is the aggregate number of cases for that combination. The **Pop** variable corresponds to the underlying population total in that category. Because population data was not available for cross-tabluations of race and ethnicity, race and ethnicity case and population totals have been calculated separately (each race category includes both Hispanic and non-Hispanic categories and each ethnicity category includes all races).
+
+::: callout-tip
+## County level population data
+
+I am using the same population data source for tracts and counties in this analysis, however if we select counties as the unit of analysis, the NCHS Bridged-Race Post-Censal Population Estimates have population data by age, sex, race, and ethnicity categories.
+:::
+
+I'm using a county-level dataset to compare to the census tract level dataset. This will become important because I'm forced to drop out census tract records with zero population and tracts with more cases than population. Because the numerator (Cases) and denominator (Pop) are coming from two different data sources and because the denominator is based on a sample with an associated MOE, there are quite a few records with mismatched data in the Asian-PI, Other, and Black categories. Exclusion of these records may result in biased results.
+
+Records have been merged with the SVI data that most closely corresponds to the year of diagnosis and with the NCHS urban-rural classification codes.
+
+## Data Preparation
+
+Pacific Islander rates are very sparse and unstable, so I'm going to combine Asian and Pacific Islander records into and Asian-PI category. I will also combine micropolitan and non-core into a single 'rural' category.
+
+```{r}
+
+dat[, c('Race', 'UrCode') := list(ifelse(Race=='P', 'A', Race), ifelse(UrCode==6, 5, UrCode))]
+cntydat[, c('Race', 'UrCode') := list(ifelse(Race=='P', 'A', Race), ifelse(UrCode==6, 5, UrCode))]
+
+aggcols<-c('sviyear', 'AgeGroup', 'Race', 'State', 'RPL_THEMES', 'quartile', 'UrCode')
+
+dat<-dat[, list(Cases=sum(Cases), Pop=sum(Pop)), by=c('GEOID', aggcols)]
+cntydat<-cntydat[, list(Cases=sum(Cases), Pop=sum(Pop)), by=c('County', aggcols)]
+```
+
+Factor covariates and set desired reference category.
+
+```{r}
+race_labels<-c('White', 'Black', 'Asian-PI', 'AI-AN', 'Multi', 'Other')
+URcode_labels<-c('Cen met', 'Frg met', 'Med met', 'Sml met', 'Rural')
+
+dat[, c('Race', 'UrCode', 'quartile', 'AgeGroup', 'County') := list(
+            factor(Race, levels=c('W', 'B', 'A', 'I',  'M', 'O'), labels=race_labels),
+            factor(UrCode, levels=c(1:5), labels=URcode_labels),
+            factor(quartile, levels=1:4),
+            factor(AgeGroup, levels=c('0-4', '5-14', '15-44', '45+')),
+            substr(GEOID, 1, 5))]
+
+cntydat[, c('Race', 'UrCode', 'quartile', 'AgeGroup') := list(
+            factor(Race, levels=c('W', 'B', 'A', 'I',  'M', 'O'), labels=race_labels),
+            factor(UrCode, levels=c(1:5), labels=URcode_labels),
+            factor(quartile, levels=1:4),
+            factor(AgeGroup, levels=c('0-4', '5-14', '15-44', '45+')))]
+```
+
+**View sample data**
+
+Census tract-level dataset
+
+```{r}
+head(dat)
+```
+
+County-level dataset
+
+```{r}
+head(cntydat)
+```
+
+## Data quality checks
+
+**Number of records with more cases than population by race**
+
+```{r}
+#| echo: false
+kbl(setnafill(merge(
+          dat[Cases>Pop, list(Tract=.N), by='Race'], 
+          cntydat[Cases>Pop, list(County=.N), by='Race'], 
+              by='Race', all=T), 
+      fill=0, cols=c('Tract', 'County'))) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+**Percent of records with zero cases by race**
+
+```{r}
+#| echo: false
+kbl(merge(
+      dat[,list(Tract=sum(Cases==0), Tract_Percent= sprintf("%.1f%%", (sum(Cases==0)/.N*100))), by=list(Race)],
+      cntydat[, list(County=sum(Cases==0), County_Percent= sprintf("%.1f%%", (sum(Cases==0)/.N*100))), by=list(Race)],
+      by='Race', all=T), align = c('l', rep('c', 4))) %>%
+      kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+There are **`r dat[Cases>Pop, .N]`** census-tract level records with more cases than population. This may be due to sampling error in the population data, which is sourced from the ACS for sviyears after 2005 or differential classification of individuals in the ACS data compared to FoodNet. Comparitively, there were **`r cntydat[Cases>Pop, .N]`** county-level records with more cases than population.
+
+## Ratio of variance to mean of cases by race, and year for census-tract and county level datasets
+
+```{r}
+#| echo: false
+temp<-rbind(dat[,list(Data='CT-Level', Ratio=round(var(Cases)/mean(Cases), 2)), 
+                  by=c('Race', 'sviyear', 'AgeGroup')], 
+            cntydat[,list(Data='County-level', Ratio=round(var(Cases)/mean(Cases), 2)), 
+                    by=c('Race', 'sviyear', 'AgeGroup')]) 
+
+plots<-
+temp %>%
+  split(.$Data) %>%
+  map(~ggplot(.x, aes(Ratio, AgeGroup, color=Race)) +
+  geom_point()+
+  geom_vline(xintercept=1)+
+  facet_grid(rows=vars(sviyear))+
+  scale_color_calc()+
+  labs(title = "Ratio of variance to mean of cases")+
+  theme_light())
+```
+
+::: panel-tabset
+```{r}
+#| fig-width: 12
+#| fig-height: 8
+#| results: asis
+#| warning: false
+#| echo: false
+
+iwalk(plots, ~ {
+  cat('## ', .y, '\n\n')
+  
+  print(.x)
+  
+  cat('\n\n')
+  
+})
+```
+:::
+
+## Distribution of selected geographic units by number of cases for all race groups
+
+These plots shows distribution of tracts and counties by number of cases for each race category for all years and age groups, exlucding records with no population.
+
+```{r}
+#| echo: false
+dat[, Data :='CT-level']
+cntydat[, Data := 'County-level']
+
+rbind(dat[Pop>0, c('Cases', 'Race', 'Data')], cntydat[Pop>0, c('Cases', 'Race', 'Data')]) %>%
+  ggplot(aes(x=Cases, fill=Data)) +
+    facet_grid(cols=vars(Race), rows=vars(Data), scales = 'free')+
+    geom_histogram(position="identity", bins=15)+
+    scale_fill_calc()+
+    theme_light()
+```
+
+::: callout-note
+I have records with zero population so including population counts as an offset (i.e., log(0)=-inf error). Therefore, I'm dropping zero population counts and including the log of pop as an offset.
+:::
+
+```{r}
+dat<-dat[Pop>0 & Cases <= Pop, ]
+cntydat<-cntydat[Pop>0 & Cases <= Pop , ]
+```
+
+I'm creating a boolean variable so classify a tract or county having one or more cases in a specific category. This value will be used as the outcome in the logistic regression models below. I'm also going to create a variable for sviyear centered around the mean to help model fit and convergence.
+
+```{r}
+dat$HasCases<-ifelse(dat$Cases>0, 1, 0)
+cntydat$HasCases<-ifelse(cntydat$Cases>0, 1, 0)
+
+dat$CenteredYear<-dat$sviyear-mean(dat$sviyear)
+dat$sviyear<-factor(dat$sviyear)
+
+cntydat$CenteredYear<-cntydat$sviyear-mean(cntydat$sviyear)
+cntydat$sviyear<-factor(cntydat$sviyear)
+```
+
+# Bivariate associations
+
+**Percent of tracts with one or more cases by SVI quartile and Race**
+
+```{r}
+#| echo: false
+dat[!is.na(quartile), list(Percent=sum(HasCases)/.N), by=list(Race, quartile)] %>%
+  ggplot(aes(x=quartile, y=Percent, fill=Race)) + 
+  geom_bar(stat='identity')+
+  scale_fill_calc()+
+  facet_grid(cols=vars(Race))+
+  theme_light()+
+  theme(legend.position='none', strip.text.x = element_text(color='black', size=12, face="bold"))
+```
+
+**Percent of counties with one or more cases by SVI quartile and Race**
+
+```{r}
+#| echo: false
+cntydat[!is.na(quartile), list(Percent=sum(HasCases)/.N), by=list(Race, quartile)] %>%
+  ggplot(aes(x=quartile, y=Percent, fill=Race)) + 
+  geom_bar(stat='identity')+
+   scale_fill_calc()+
+  facet_grid(cols=vars(Race))+
+  theme_light()+
+  theme(legend.position='none', strip.text.x=element_text(color='black', size=12, face="bold"))
+```
+
+**Shigella Rate per 100K by SVI Quartile and Race among Tracts One or More Cases**
+
+```{r}
+#| echo: false
+dat[Cases>0 &!is.na(quartile), list(Rate=sum(Cases)/sum(Pop)*100000), by=list(GEOID, Race, quartile)] %>%
+  ggplot(aes(x=quartile, y=Rate, color=Race))+
+    facet_grid(cols=vars(Race), scales='free')+
+    stat_summary(fun.data=mean_cl_boot,size=0.5)+
+    scale_color_calc()+
+    theme_light()+
+    theme(legend.position = 'none', 
+          panel.grid.major.x = element_blank(),
+          strip.text.x=element_text(color='black', size=12, face="bold"))
+```
+
+**Shigella Rate per 100K by SVI Quartile and Race among Counties One or More Cases**
+
+```{r}
+#| echo: false
+cntydat[Cases>0 &!is.na(quartile), list(Rate=sum(Cases)/sum(Pop)*100000), by=list(County, Race, quartile)] %>%
+  ggplot(aes(x=quartile, y=Rate, color=Race))+
+    facet_grid(cols=vars(Race), scales='free')+
+    stat_summary(fun.data=mean_cl_boot,size=0.5)+
+    scale_color_calc()+
+    theme_light()+
+    theme(legend.position = 'none', 
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          strip.text.x=element_text(color='black', size=12, face="bold"))
+```
+
+**Log(Shigella Rate per 100K) by SVI Score among Tracts One or More Cases by Age Each Race Category**
+
+```{r}
+#| echo: false
+#| warning: false
+plots <- dat %>%
+  filter(Cases>0) %>%
+  split(.$Race) %>%
+  map(~ggplot(.x, aes(RPL_THEMES, log(Cases/Pop*100000))) +
+      facet_grid(cols=vars(AgeGroup),  scales='free')+
+      geom_point()+
+      stat_sum(alpha=0.5) + ## show overlapping/replicated points as circles (semi-transparent)
+      scale_size(range=c(2,8)) + ## cosmetic: make minimum size (non-replicated) points larger  
+      ## fit and display a flexible smooth curve for point data
+      geom_smooth(method="gam",method.args=list(family="quasipoisson"))
+  )
+```
+
+::: panel-tabset
+```{r}
+#| fig-width: 12
+#| fig-height: 8
+#| results: asis
+#| warning: false
+
+iwalk(plots, ~ {
+  cat('## ', .y, '\n\n')
+  
+  print(.x)
+  
+  cat('\n\n')
+  
+})
+```
+:::
+
+**Log(Shigella Rate per 100K) by SVI Score among Counties One or More Cases by Age Each Race Category**
+
+```{r}
+#| echo: false
+#| warning: false
+plots <- cntydat %>%
+  filter(Cases>0) %>%
+  split(.$Race) %>%
+  map(~ggplot(.x, aes(RPL_THEMES, log(Cases/Pop*100000))) +
+      facet_grid(cols=vars(AgeGroup),  scales='free')+
+      geom_point()+
+      stat_sum(alpha=0.5) + ## show overlapping/replicated points as circles (semi-transparent)
+      scale_size(range=c(1,5)) + ## cosmetic: make minimum size (non-replicated) points larger  
+      ## fit and display a flexible smooth curve for point data
+      geom_smooth(method="lm", formula = y ~ poly(x, 2)) +
+      theme(legend.position = 'none')
+  )
+```
+
+::: panel-tabset
+```{r}
+#| fig-width: 12
+#| fig-height: 8
+#| results: asis
+#| warning: false
+
+iwalk(plots, ~ {
+  cat('## ', .y, '\n\n')
+  
+  print(.x)
+  
+  cat('\n\n')
+  
+})
+```
+:::
+
+It looks like the effect of SVI score (RPL_THEMES) on Shigella incidence among counties with 1+ cases might be closer to a quadratic trend. I'll create a new variable **rpl_themes2** to reflect the quadratic effect of time.
+
+```{r}
+cntydat[, rpl_themes2 := RPL_THEMES^2]
+```
+
+# Multivariate Analysis
+
+I'm going to stratify my analysis by age group
+
+```{r}
+dat<-dat %>% split(.$AgeGroup)
+cntydat<-cntydat %>% split(.$AgeGroup)
+```
+
+## Logistic Regression Model Compared to Binomial Portion of Hurdle Model
+
+Starting off with a very simple approach, I'm modeling the log(odds) of a county having one or more Shigella cases using generalized linear mixed-effects model (GLMM) from the lme4 package. This model allows me to include random intercepts for State. The the glmer function produces *practically* equivalent results as the glmmTMB package, but slight differences are present due to the Laplace Approximation used by glmmTMB.
+
+Here, instead of including the log(Population) as an offset term as I would if modeling a rate, I'm just controlling for it.
+
+```{r}
+mod.log0<-glmer(HasCases ~ quartile + log(Pop) + (1|State), family=binomial(link='logit'),    data=cntydat$`0-4`)
+```
+
+This model is a mirror image of the binomial portion of a hurdle model. The binomial portion of the hurdle model models the log odds of a county having **no** cases whereas the logistic model models the log odds of a county having **one or more cases**. The only difference is the sign on the parameter estimates (and the extra conditional model in the hurdle model).
+
+**Equivalent hurdle model for comparison**
+
+```{r}
+hurdle.comp<-glmmTMB(Cases ~ quartile + offset(log(Pop)) + (1|State), ziformula= ~log(Pop) + quartile + (1|State), family=truncated_poisson, data=cntydat$`0-4`)
+```
+
+**Log(odds) and confidence intervals from logistic regression**
+
+```{r}
+mod.log0.estimates<-round(cbind(na.omit(confint(mod.log0, method='Wald')), fixef(mod.log0)), 4)
+colnames(mod.log0.estimates)[3]<-'Estimate'
+mod.log0.estimates
+```
+
+**Log(odds) and confidence intervals from hurdle regression**
+
+```{r}
+hurdle.comp.estimates<-round(confint(hurdle.comp), 4)
+hurdle.comp.estimates<-hurdle.comp.estimates[grepl('zi.', row.names(hurdle.comp.estimates)),]
+hurdle.comp.estimates
+```
+
+## Full logistic regression model of log(odds) of having one or more cases
+
+I'm trying a few different models with RPL_THEMES (continuous SVI score) and Race as my main covariates of interest, including additional fixed and random effects.
+
+### County-Level Data Base model
+
+```{r}
+mod.log1<-glmer(HasCases ~ RPL_THEMES + Race + log(Pop) + sviyear + (1|State), 
+                family=binomial(link='logit'),  
+                data=cntydat$`0-4`)
+```
+
+**Add Urban-Rural covariate**
+
+```{r}
+mod.log2<-update(mod.log1, . ~ . + UrCode)
+```
+
+**Add interaction term between race and SVI score**
+
+```{r}
+mod.log3<-update(mod.log2, . ~ . + Race*RPL_THEMES)
+```
+
+### Census Tract-Level Data
+
+**Base model**
+
+```{r}
+mod.log1.1<-glmer(HasCases ~ RPL_THEMES + Race + log(Pop) + sviyear + (1|State), 
+                family=binomial(link='logit'),  
+                data=dat$`0-4` )
+```
+
+**Add Urban-Rural covariate**
+
+```{r}
+mod.log2.1<-update(mod.log1.1, . ~ . + UrCode)
+```
+
+**Add interaction term between race and SVI score** Note, I'm updating the optimizer because this model will not converge with the interaction term.
+
+```{r}
+mod.log3.1<-update(mod.log2.1, . ~ . + Race*RPL_THEMES, 
+                 control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)))
+```
+
+**Change random effect of State to County nested within state**
+
+```{r}
+mod.log4.1<-update(mod.log3.1, . ~ . + (1|County:State))
+```
+
+## View Fixed Effect Odds Ratios and 95% Confidence Intervals
+
+```{r}
+#| echo: false
+mod.list<-list(mod.log1, mod.log1.1, mod.log2, mod.log2.1, mod.log3, mod.log3.1, mod.log4.1)
+names(mod.list)<-c('mod.log1', 'mod.log1.1', 'mod.log2', 'mod.log2.1', 'mod.log3', 'mod.log3.1', 'mod.log4.1')
+feffects<-data.frame(Model=character(), 
+                     Covariate=character(), 
+                     OR=double(), Lower.CI=double(), Upper.CI=double())
+
+for (i in 1:length(mod.list)){
+  OR=data.frame(OR=exp(fixef(mod.list[[i]])))
+  CI=data.frame(CI=exp(confint(mod.list[[i]], method='Wald'))) 
+  temp<-merge(OR, CI, by='row.names', all.x=T)
+  names(temp)<-c('Covariate', 'OR', 'Lower.CI', 'Upper.CI')
+  temp$Model<- names(mod.list[i])
+  feffects<-rbind(feffects, temp)
+}
+setDT(feffects)
+```
+
+::: callout-note
+Note, the interpretation of race/svi parameters in Model 4 is different due to interaction term!.
+:::
+
+**Models without interaction term**
+
+```{r}
+#| echo: false
+feffects %>%
+  filter(Covariate != '(Intercept)' & !(Model %in% c('mod.log3', 'mod.log3.1', 'mod.log4.1') )) %>%
+    ggplot(aes(y=factor(Covariate)))+
+    geom_point(aes(x=OR, color=factor(Model)),  size=3, alpha=0.8)+
+    geom_linerange(aes(xmin=Lower.CI, xmax=Upper.CI, color=factor(Model))) +
+    scale_color_calc()+
+    labs(color = "Model")+
+    theme_clean()
+```
+
+**Models WITH interaction term**
+
+```{r}
+#| echo: false
+feffects %>%
+  filter(Covariate != '(Intercept)' & (Model %in% c('mod.log3', 'mod.log3.1', 'mod.log4.1') )) %>%
+    ggplot(aes(y=factor(Covariate)))+
+    geom_point(aes(x=OR, color=factor(Model)),  size=3, alpha=0.8)+
+    geom_linerange(aes(xmin=Lower.CI, xmax=Upper.CI, color=factor(Model))) +
+    scale_color_calc()+
+    labs(color = "Model")+
+    theme_clean()
+```
+
+**Table of fixed effects: odds ratio (95% CI)**
+
+```{r}
+#| echo: false
+feffects[, 2:4]<-lapply(feffects[, 2:4], round, 2)
+feffects[, 'OR: 95%CI' :=  paste0(OR, " (", Lower.CI, "-", Upper.CI, ")")]
+
+kbl(dcast(feffects, Covariate ~ Model, value.var = paste('OR: 95%CI'))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 9)
+```
+
+### Model Fit Comparison and Diagnostics
+
+**County-Level Models**
+
+```{r}
+#| echo: false
+glm.model.comparison<-anova(mod.log1, mod.log2, mod.log3)
+glm.model.comparison[,1:5] %>% arrange(desc(AIC))
+```
+
+**Census-Tract Level Models**
+
+```{r}
+#| echo: false
+glm.model.comparison<-anova(mod.log1.1, mod.log2.1, mod.log3.1, mod.log4.1)
+glm.model.comparison[,1:5] %>% arrange(desc(AIC))
+```
+
+**Evaluate quantile residuals from full logistic model**
+
+Quantile residuals have been shown to be more appropriate for GLMM model diagnostics. The cumulative probability that an observation is less than or equal to the fitted value of a given distribution is determined and then used to find the corresponding value of the standard normal variate (i.e., quantile residual).
+
+-   [Dunn KP, Smyth GK. Randomized quantile residuals. J Comput Graph Stat. 1996;5:1-10.](https://www.tandfonline.com/doi/abs/10.1080/10618600.1996.10474708)
+
+-   [Feng C, Li L, Sadeghpour A. A comparison of residual diagnosis tools for diagnosing regression models for count data. BMC Med Res Methodol. 2020 Jul 1;20(1):175.](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7329451/#!po=2.94118)
+
+I'm going to test output from Model #2 (County-level model without interaction).
+
+Model #4 appears to have the best fit among the census-tract level models (based on the AIC) but answers a slightly different question than the original research question (what is the effect of race after accounting for SVI on the incidence of Shigella?). Due to the inclusion of the interaction between race and SVI, Model #4 shows what the impact of SVI is for different race categories.
+
+**Simulate Residuals for Model #2**
+
+```{r}
+mod2simout<-simulateResiduals(fittedModel =  mod.log2, plot=F)
+```
+
+**View simulated residuals**
+
+```{r}
+plot(mod2simout)
+```
+
+The Kolmogorov-Smirnov test shows a poor goodness of fit in Model #2, however this test is sensitive to Type I errors and because I have a large amount of data (n=11699), this result might not be too much of an issue. The QQ is nearly linear, suggesting that the overall distribution is acceptable. from I'll go through some more diagnostics to evaluate if there are any obvious problems with the fit of Model #2.
+
+**Non-parametric test for overdispersion**
+
+```{r}
+testDispersion(mod2simout)
+```
+
+**Test for zero-inflation**
+
+```{r}
+testZeroInflation(mod2simout)
+```
+
+**Test for outliers**
+
+```{r}
+testOutliers(mod.log2)
+```
+
+There is no significant difference in the observed frequency of outliers compared to expected.
+
+| Outlier Type |     |
+|:-------------|----:|
+| Observed     | 104 |
+| Expected     |  93 |
+
+**View simulated residuals plotted against covariates in Model #2**
+
+```{r}
+plotResiduals(mod2simout, form = na.omit(cntydat$`0-4`$RPL_THEMES))
+plotResiduals(mod2simout, form = na.omit(cntydat$`0-4`)$Race)
+plotResiduals(mod2simout, form = na.omit(cntydat$`0-4`)$sviyear)
+plotResiduals(mod2simout, form = na.omit(cntydat$`0-4`)$UrCode)
+plotResiduals(mod2simout, form = with(na.omit(cntydat$`0-4`), Pop))
+```
+
+## Hurdle Model (County-Level Data)
+
+I will create a list of hurdle poisson and hurdle negative binomial models to compare fit. Each model includes the log of population as an offset term and a random intercept for state and/or county nested in state in the conditional portion of the model. Different covariates are evaluated in both the conditional and the zero-inflation (binomial) portion of the model.
+
+###Truncated Poisson Models
+
+**Null Model**
+
+```{r}
+modhur0<-glmmTMB(Cases ~ offset(log(Pop)) + (1|State), zi= ~1, family=truncated_poisson, data=cntydat$`0-4`)
+```
+
+**Base Model, includes essential covariates**
+
+```{r}
+modhur1<-update(modhur0, . ~ . + Race + RPL_THEMES + sviyear)
+```
+
+**Add urban-rural designation**
+
+```{r}
+modhur2<-update(modhur1, . ~ . + UrCode)
+```
+
+**Add quadratic trend of RPL_THEME**
+
+```{r}
+modhur3<-update(modhur2, . ~ . +  (rpl_themes2))
+```
+
+```{r}
+#Compare models
+hurdle.poisson.comparison<-anova(modhur0, modhur1, modhur2, modhur3)
+hurdle.poisson.comparison[,c(1:5, 8)] %>% arrange(desc(AIC))
+```
+
+**Add covariates to binomial portion of the model** It doesn't appear that the quadratic effect of RPL_THEMES adds anything to the model, so I'm dropping out that term.
+
+```{r}
+modhur3<-update(modhur2, ziformula = ~ . )
+```
+
+###Truncated negative binomial distribution
+
+```{r}
+modhur0.1<-update(modhur0, family=truncated_nbinom2)
+modhur1.1<-update(modhur1, family=truncated_nbinom2)
+modhur2.1<-update(modhur2, family=truncated_nbinom2)
+modhur3.1<-update(modhur3, family=truncated_nbinom2)
+```
+
+### Hurdle model comparison
+
+```{r}
+#| echo: false
+models<-list(modhur0, modhur0.1, modhur1, modhur1.1, modhur2, modhur2.1, 
+             modhur3, modhur3.1)
+model_specs<-data.frame()
+
+for (i in 1:length(models)){
+  model_specs[i, 1]<-as.character(models[[i]]$call)[2]
+  model_specs[i, 2]<- as.character(models[[i]]$modelInfo$allForm$ziformula)[[2]]
+  model_specs[i, 3]<-as.character(models[[i]]$call)[4]
+  model_specs[i, 4]<-AIC(models[[i]])
+  model_specs[i, 5]<-ifelse(models[[i]]$fit$convergence==0, 'Yes', 'No')
+  model_specs[i, 6]<-length(models[[i]]$fit$par)
+  model_specs[i, 7]<-sigma(models[[i]])
+}
+
+colnames(model_specs)<-c('Conditional Formula', 'ZI Formula', 'Distribution', 
+                         'AIC', 'Covergence', 'DF', 'Dispersion Parameter')
+
+model_specs %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 10)
+```
+
+**Extract model with best overall fit**
+
+```{r}
+final_mod<-models[[which.min(sapply(1:length(models),function(x)AIC(models[[x]])))]]
+```
+
+**Final Model Summary**
+
+```{r}
+summary(final_mod)
+```
+
+I looks like I could probably drop the urban-rural designation from the conditional portion of the model and RPL_THEMES (linear and quadratic) from the binomial portion of the model.
+
+**Visualize simulated residuals from best fit model.**
+
+```{r}
+final_mod<-update(final_mod, . ~ . -UrCode, ziformula = ~ Race +  sviyear + UrCode)
+summary(final_mod)
+```
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = final_mod, plot=F) 
+plot(simulationOutput)
+testDispersion(simulationOutput = simulationOutput, alternative ="less")
+testOutliers(simulationOutput)
+```
+
+Outliers seem to be flagged as a problem for this model. The DHARMa documentation indicates that binomial models may have an inflated Type I error rate and to re-run the outlier test with bootstrap to achieve a more exact result.
+
+```{r}
+testOutliers(simulationOutput, type='bootstrap')
+```
+
+**Plot residuals against covariates in model**
+
+```{r}
+plotResiduals(simulationOutput, form = na.omit(cntydat$`0-4`$RPL_THEMES))
+plotResiduals(simulationOutput, form = na.omit(cntydat$`0-4`$Race))
+plotResiduals(simulationOutput, form = na.omit(cntydat$`0-4`$sviyear))
+plotResiduals(simulationOutput, form = na.omit(cntydat$`0-4`$UrCode))
+plotResiduals(simulationOutput, form = na.omit(cntydat$`0-4`$Pop))
+```
