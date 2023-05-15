@@ -151,18 +151,18 @@ nchs$UrCode<-nchs$`2013.code`
 
 fin[, STCNTY := ifelse(is.na(STCNTY), str_sub(GEOID, 1, 5), STCNTY)]
 fin<-merge(fin, nchs[,10:11], by='STCNTY', all.x=T)
-fin$STCNTY<-NULL
+names(fin)[names(fin)=='STCNTY']<-'County'
 
 ########################## END DATA PREPARATION  #####################################
 
 #-------------------------------------------------------------------------------
 #Output final datasets
 #-------------------------------------------------------------------------------
-write.csv(fin[!is.na(Race), !"Ethnicity"], 
+write.csv(fin[Race !='All', !"Ethnicity"], 
           paste0("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/",
           "Final_Aggregate_ByRace_", Sys.Date(), '.csv'), row.names = F)
 
-write.csv(fin[!is.na(Ethnicity), !"Race"], 
+write.csv(fin[Ethnicity !='All', !"Race"], 
           paste0("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/",
           "Final_Aggregate_ByEthnicity_", Sys.Date(), '.csv'), row.names = F)
 
