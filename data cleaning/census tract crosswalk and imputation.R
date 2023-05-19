@@ -1,18 +1,68 @@
 #Import libraries
-library('openxlsx')
 library('rvest')
 library('stringr')
 library('data.table')
 library('tigris')
 
 #---------------------------------------------------------------------------------
-#Import Shigella cases
+#Set any census tract GEOID's to missing if not in FoodNet state
 #---------------------------------------------------------------------------------
-setwd('//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/')
-dat<-setDT(read.csv('analytic_file_V6.csv', stringsAsFactors = F, 
-                    colClasses = c("CTNO2000"="character", "CTNO2010"="character")))
-           
-dat$CTNO2010<-str_pad(dat$CTNO2010, 11, side='left', pad='0')
+foodnetstates<-c('06','08','09','13','24','27','35','36' ,'41','47')
+dat[!(substr(CTNO2010, 1, 2) %in% foodnetstates), 'CTNO2010':=NA]
+dat[!(substr(CTNO2000, 1, 2) %in% foodnetstates), 'CTNO2000':=NA]
+
+#---------------------------------------------------------------------------------
+#Import U.S. Census gazetteer files
+#---------------------------------------------------------------------------------
+folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/'
+ctlist1<-read.delim(paste0(folder, 'ACS Data/Supplemental Files/2019_Gaz_tracts_national.txt'))
+ctlist2<-read.delim(paste0(folder, 'ACS Data/Supplemental Files/2010_Gaz_tracts_national.txt'))
+ctlist3<-read_lines(paste0(folder, 'ACS Data/Supplemental Files/2000_Gaz_tracts_national.txt'))
+ctlist3<-read.fwf(textConnection(ctlist3), widths=c(2, 2, 3, 6, 9, 9, 14, 14, 14, 14, 14, 15))
+names(ctlist3)<-c('USPS', 'ST', 'CO', 'CT', 'POP', 'HU', 'LArea', 'WArea', 'LAreaMiles', 'WAreaMiles', 'Lat', 'Long')
+ctlist3$GEOID<-paste0(str_pad(ctlist3$ST, 2, pad='0'), str_pad(ctlist3$CO, 3, pad='0'), str_pad(ctlist3$CT, 6, pad="0"))
+
+#---------------------------------------------------------------------------------
+#Combine gazetteer files
+#---------------------------------------------------------------------------------
+ctlist1$year<-2010
+ctlist2$year<-2019
+ctlist3$year<-2000
+
+keep.fields<-c('USPS', 'GEOID', 'year')
+ctlist<-rbind(ctlist1[, keep.fields], 
+              ctlist2[!(ctlist2$GEOID %in% ctlist1$GEOID), keep.fields],
+              ctlist3[, keep.fields])
+rm(ctlist1, ctlist2, ctlist3)
+
+ctlist$GEOID<-str_pad(ctlist$GEOID, 11, pad='0')
+setDT(ctlist)
+
+#---------------------------------------------------------------------------------
+#Reassign GEOIDs to the correct year for census tracts that have a 2000 GEOID 
+#in the CTNO2010 column (or visa versa)
+#---------------------------------------------------------------------------------
+dat[CTNO2010 %in% ctlist[year==2000,GEOID] & !CTNO2010 %in% ctlist[year>2000,GEOID] 
+    & is.na(CTNO2000), 'CTNO2000':=CTNO2010]
+
+dat[!(CTNO2010 %in% ctlist[year>2000,GEOID]) & CTNO2010==CTNO2000, 'CTNO2010':=NA]
+
+#---------------------------------------------------------------------------------
+#Extract county fips codes
+#---------------------------------------------------------------------------------
+dat[, 'CNTYFIPS':= ifelse(!is.na(CTNO2010), substr(CTNO2010, 1, 5), substr(CTNO2000, 1, 5))]
+
+#---------------------------------------------------------------------------------
+#Set invalid census tracts to missing (these are 2020 GEOID's)
+#---------------------------------------------------------------------------------
+dat[!CTNO2010 %in% ctlist[year>2000,GEOID] & !is.na(CTNO2010), CTNO2010 := NA]
+
+#---------------------------------------------------------------------------------
+#Check number of cases with missing census tract information
+#---------------------------------------------------------------------------------
+missct<-dat[, list(Set='Original', 
+                   Missing_2000 = sum(is.na(CTNO2000)), 
+                   Missing_2010=sum(is.na(CTNO2010))), by='Year']
 
 #---------------------------------------------------------------------------------
 #Import-relationship-file
@@ -34,8 +84,8 @@ setnames(rf, c('GEOID00','GEOID10'),  c('CTNO2000', 'CTNO2010'))
 #---------------------------------------------------------------------------------
 #Select tracts with cases that are missing the corresponding tract value
 #---------------------------------------------------------------------------------
-t0<-dat[is.na(CTNO2010) & Year > 2005, .(cases=.N), by=c('CTNO2000')]
-t1<-dat[is.na(CTNO2000) & Year < 2006, .(cases=.N), by=c('CTNO2010')]
+t0<-dat[is.na(CTNO2010) & !is.na(CTNO2000) & Year > 2005, .(cases=.N), by=c('CTNO2000')]
+t1<-dat[is.na(CTNO2000) & !is.na(CTNO2010) & Year < 2006, .(cases=.N), by=c('CTNO2010')]
 
 #---------------------------------------------------------------------------------
 #Classify tracts in relationship file by change type
@@ -53,11 +103,14 @@ rf[,Type :=ifelse(PART00=='W' & PART10=='W', 'Unchanged',
 #---------------------------------------------------------------------------------
 rf_vars<-c('CTNO2000', 'CTNO2010', 'Type')
 
-t0<-merge(t0, rf[!(Type %in% c('Split', 'Major')), ..rf_vars],  by='CTNO2000', all.x=T)
-t1<-merge(t1, rf[!(Type %in% c('Merged', 'Major')), ..rf_vars], by='CTNO2010', all.x=T)
+t0<-merge(t0, rf[, ..rf_vars], by='CTNO2000', all.x=T)
+t1<-merge(t1, rf[, ..rf_vars], by='CTNO2010', all.x=T)
 
-rbind( t0[, list(Missing='2010 CT', Tracts=length(unique(CTNO2000)), Cases=sum(cases)), by='Type'],
+tract_with_missing_by_rf<-rbind( t0[, list(Missing='2010 CT', Tracts=length(unique(CTNO2000)), Cases=sum(cases)), by='Type'],
        t1[, list(Missing='2000 CT', Tracts=length(unique(CTNO2010)), Cases=sum(cases)), by='Type'])
+
+t0<-subset(t0, !Type %in% c('Split', 'Major'))
+t1<-subset(t1, !Type %in% c('Merged', 'Major'))
 
 #---------------------------------------------------------------------------------
 #Update missing census tract values using crosswalk
@@ -68,7 +121,10 @@ dat[t1, c('CTNO2000') := ifelse(is.na(CTNO2000), i.CTNO2000, CTNO2000), on = "CT
 #---------------------------------------------------------------------------------
 #Split cases with missing tract information for imputation
 #---------------------------------------------------------------------------------
-dat[,MissCT := (is.na(CTNO2010) & Year > 2005 | is.na(CTNO2000) & Year < 2006)]
+dat[,MissCT := (is.na(CTNO2010) & !is.na(CTNO2000) & Year > 2005 | 
+                is.na(CTNO2000) & !is.na(CTNO2010) & Year < 2006)]
+
+dat[,ID := row.names(dat)]
 dtlist<-split(dat, by='MissCT')
 
 #---------------------------------------------------------------------------------
@@ -91,9 +147,6 @@ dtm[rf[Largest10Part==T,], c('Deterministic', 'POPPCT00') := list(
 dtm[rf[Largest00Part==T,],  c('Deterministic', 'POPPCT10') := list(
                           ifelse(is.na(CTNO2000), i.CTNO2000, CTNO2000), i.POPPCT10), 
           on = "CTNO2010"]
-
-#Mean % of the original census tract population contained in the imputed tract
-dtm[, list(AvgPer2000Pop=mean(POPPCT00, na.rm=T), AvgPer2010Pop=mean(POPPCT10, na.rm=T)) ]
 
 #---------------------------------------------------------------------------------
 #Stochastic imputation: allocates cases to intersecting tracts using population-
@@ -124,7 +177,7 @@ rf[, CPropMax10 := round(cumsum(POP10PT/POP10), 3), by='CTNO2010']
 rf[, CPropMin10 := c(0, CPropMax10[-.N]+0.001), by='CTNO2010']
 
 #Average number of 2000 candidates per 2010 tract
-rf[CTNO2010 %in% stc$CTNO2010, length(unique(CTNO2000)), by='CTNO2010'][, mean(V1)]
+stc_avg_candidates<-rf[CTNO2010 %in% stc$CTNO2010, length(unique(CTNO2000)), by='CTNO2010'][, mean(V1)]
 
 #Merge in all potential 2000 matches for known 2010 tracts
 stc<-merge(stc, rf[,.(CTNO2010, Stochastic=CTNO2000, CPropMin10, CPropMax10, POPPCT10)],
@@ -136,8 +189,6 @@ stc<-subset(stc, randoms>=CPropMin00 & randoms<=CPropMax00 |randoms>=CPropMin10 
 #Drop extra columns
 stc[, c('Stochastic') := .(fcoalesce(Stochastic.x, Stochastic.y))]
 stc<-stc[, c('ID', 'Stochastic', 'POPPCT00', 'POPPCT10')]
-
-stc[, list(AvgPer2000Pop=mean(POPPCT00, na.rm=T), AvgPer2010Pop=mean(POPPCT10, na.rm=T)) ]
 
 #---------------------------------------------------------------------------------
 #Combine Deterministic and Stochastic results for comparison
@@ -194,7 +245,7 @@ smp<-smp[randoms>=CPropMin10 & randoms<=CPropMax10, ]
 #Percent of cases assigned to correct CT by method
 #---------------------------------------------------------------------------------
 temp4<-rbind(
-smp[, list(State="All", Cases=.N,
+smp[, list(Year="All", Cases=.N,
            Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
            Stochastic_2010=sum(Stochastic_10==CTNO2010)/.N, 
            Deterministic_2000=sum(Deterministic_00==CTNO2000)/.N, 
@@ -204,25 +255,20 @@ smp[, list(Cases=.N,
            Deterministic_2010=sum(Deterministic_10==CTNO2010)/.N, 
            Stochastic_2010=sum(Stochastic_10==CTNO2010)/.N, 
            Deterministic_2000=sum(Deterministic_00==CTNO2000)/.N, 
-           Stochastic_2000=sum(Stochastic_00==CTNO2000)/.N), by='State']
+           Stochastic_2000=sum(Stochastic_00==CTNO2000)/.N), by='Year']
 )
 ################################################################################
 #Output results
 result_list<-list("Percent of Pop in Imputed Tract"=temp1, 
                   "Percent Same Result by Year"=temp2,
                   "Percent Same Result by State"=temp3,
-                  "Accuracy Estimation by State"=temp4)
+                  "Accuracy Estimation by Year"=temp4)
 
-write.xlsx(result_list, file="//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Preliminary Results/Impution Results.xlsx")
+openxlsx::write.xlsx(result_list, file="//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Preliminary Results/Impution Results.xlsx")
 
 #Merge imputed tracts with original dataset and output 
 dat$MissCT<-NULL
 dat<-merge(dat, results[, c('ID', 'Deterministic', 'Stochastic')], by='ID', all.x=T)
-options(scipen=500)
-write.csv(dat, "analytic_file_V7.csv", row.names=F)
 ################################################################################
+
 # END
-
-
-
-
