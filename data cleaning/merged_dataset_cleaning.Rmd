@@ -6,112 +6,90 @@ output:
     df_print: paged
 ---
 
-```{r include=FALSE}
+```{r, setup, include=FALSE}
 knitr::opts_chunk$set(message = FALSE)
 ```
 
-```{r}
+```{r, include=F}
 library('data.table')
 library('ggplot2')
 library('stringr')
 library('kableExtra')
+library('tidyverse')
+library('readxl')
 ```
 
 ```{r}
-setwd('//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS')
-dat<-read.csv('FN_NARMS_PulseNet_Census.csv', stringsAsFactors = F)
+#Import final FoodNet datatset
+folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/'
+dat<-read_excel(path=paste0(folder, 'loganshigella_20230413.xlsx'), col_types = "text")
 setDT(dat)
 ```
 
-# Clean variables for demographic tables
-****
-## Age Range
-AgeRange is derived from the **Age** variable. There are `r sum(is.na(dat$AgeRange))` records with missing age range.
-However, there are additional age variables: **PatientAgeYears**, **PatientAgeMonths**, **PatientAgeDays**, and **PatientAgeFromPulsenet** so perhaps we can fill in some missing values. 
-```{r, include=T}
-t1<-table(rowSums(is.na(dat[, c('PatientAgeYears', 'PatientAgeMonths', 'PatientAgeDays', 'PatientAgeFromPulsenet')]))<4, is.na(dat$Age))
-```
-There are `r t1[4]` records that have a NULL Age value, but have at least one non-missing values for PatientAge* or PatientAgeFromPulesNet. 
-
-Before we fill-in missing data, let's double-check to make sure that the original AgeRange was calculated correctly. 
+# Data management
 ```{r}
-dat<-dat[order(PatientAgeYears),]
-print(dat[AgeUnit=='Months', c('AgeRange', 'Age', 'AgeUnit', 'PatientAgeYears')] , nrow=25)
-```
-It looks like the age unit was neglected when calculating AgeRange. We will need to re-cut that variable.
-
-It also appears that Age was calculated in years based on elapsed dates for a lot of records, those are missing an age unit. What I think happened is that AgeYrs, which was a FoodNet numeric double field calculated on elapsed time between DOB and DtSpec date, was combined with Age from NARMS which was a numeric integer that needs AgeUnit to be correctly interpreted. We will need to create an AgeClean field to fix this error. We will also use the PatientAgeFromPulseNet, PatientAgeYears, and PatientAgeMonths variables to fill in missing values.
-```{r}
-dat$AgeUnit[is.na(dat$AgeUnit) & !is.na(dat$Age)]<-'Years'
-dat$PNAge<-ifelse(grepl("0-", dat$PatientAgeFromPulsenet)==T, 0, as.numeric(dat$PatientAgeFromPulsenet))
+#Missing values
+dat[dat=='.']<-NA
+dat$CTNO2000[dat$CTNO2000=='UNKNOWN']<-NA
+dat$CTNO2010[dat$CTNO2010=='UNKNOWN']<-NA
 ```
 
 ```{r}
-dat$AgeClean<-floor(
-               ifelse(dat$AgeUnit=='Years'   & !is.na(dat$Age), dat$Age,
-                ifelse(dat$AgeUnit=='Months' & !is.na(dat$Age), dat$Age/12,
-                 ifelse(is.na(dat$Age) & !is.na(dat$PNAge), dat$PNAge,
-                   ifelse(is.na(dat$Age) & is.na(dat$PNAge) & !is.na(dat$PatientAgeYears), dat$PatientAgeYears, 
-                     ifelse(is.na(dat$Age) & is.na(dat$PNAge) & is.na(dat$PatientAgeYears), dat$PatientAgeMonths/12, NA))))))
+#numeric fields
+numvars<-c('Year', 'Age')
+dat[,  (numvars) := lapply(.SD, as.numeric), .SDcols=numvars]
 ```
 
-Ok, let's take a look at the new AgeClean variable and see how it compares to the original. We should see shift in cases original classified in the 5-24 ages to the <2 age ranges.  
+# Census tract verification and imputation
+```{r}
+#Format census tract geoid's
+dat[,'CTNO2000' :=  str_pad(CTNO2000, 11, 'left', pad=0)]
+dat[,'CTNO2010' :=  str_pad(CTNO2010, 11, 'left', pad=0)]
+```
+
+This code is used to exclude non-valid census tract GEOID values and impute missing values based on both deterministic and stochastic methods. Missing 2000 census tract GEOID values are only imputed if the case was diagnosed before 2006 and missing 2010 values are only imputed if the case was diagnosed after 2005. Output includes summary statistics on the estimated accuracy of the imputation. 
+
+```{r, include=FALSE}
+source('census tract crosswalk and imputation.R')
+```
+
+## Data imputation results and quality
+
+*Number of tracts with missing census tract information by year of diagnosis*
+
+```{r}
+missct
+```
+
+**Number of tracts and cases by type of census tract boundary change**
+```{r}
+tract_with_missing_by_rf
+```
+
+**Average percent of population contained within the imputed census tract by method.**
+- Deterministic = Dtm
+- Stoichastic = Stc. 
 ```{r, echo=F}
-hist(dat$Age, col=rgb(0,0,1,1/4), main='Original and New Age Variables', xlab='Age Variable')
-hist(dat$AgeClean, col=rgb(1,0,0,1/4), add=TRUE)
-legend("topright", c("Original", "New"), col=c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)), lwd=10)
-
-dat$AgeRangeNew<-cut(dat$AgeClean, breaks=c(0, 5, 18, 30, 40, 50, 199), right=F, 
-                     labels=c('0-4','5-17','18-29','30-39','40-49','50+'))
-
-dat<-dat[order(AgeClean),]
-dat[!is.na(AgeRangeNew), list(MinAge=min(AgeClean, na.rm=T), MaxAge=max(AgeClean, na.rm=T)), by='AgeRangeNew']
-```
-There are now only `r sum(is.na(dat$AgeClean))` records with a missing AgeRangeNew value. 
-
-## Sex
-There are a few cases with unknown Sex that have Gender information. We will fill-in those missing
-values. 
-```{r}
-dat$Sex<-ifelse(dat$Sex=='U' & !is.na(dat$Gender), dat$Gender, dat$Sex)
+temp1
 ```
 
-## Group Serotypes
-This code condenses the values in **FinalSpeciesName** into a smaller number of categories. This variable is included in the NARMS dataset. However, there are `r sum(is.na(dat$FinalSpeciesName))`records missing FinalSpeciesName values. There is another field (**serotypesummary**) that has species values that can be used to fill in missing values. The FoodNet Codebook states that the serotypesummary field is a CDC-cleaned version of SeroSite. Per the discussion with Naeemah Logan (5/27), the NARMS FinalSpeciesName field should take precedence. 
+**Percent of tracts that had the same imputed tract result for both deterministic and stoichastic methods by year.**
+```{r, echo=F}
+temp2
+```
+
+**Estimated percent of cases assigned to correct tract by method and year (based on sample of tract with both values reported).**
+```{r, echo=F}
+temp4[order(Year),]
+```
+
+# Prepare and merge NARMS data
 
 ```{r}
-dat$SpeciesClean<-ifelse(dat$FinalGenusName !="Shigella" | 
-                         dat$FinalSpeciesName %in% c(NA, 'unknown', 'other'), 
-                         tolower(word(dat$serotypesummary, 1)), dat$FinalSpeciesName)
-
-#Add not serotyped and not speciated to unknown
-dat$SpeciesClean[dat$SpeciesClean %in% c(NA, 'not')]<-'unknown' 
-
-table(dat$FinalSpeciesName, dat$SpeciesClean, useNA='ifany')
+source('narms_data_prep.R')
 ```
 
-## FoodNet Site
-The State field is equivalent to FoodNet Site. 
-```{r}
-addmargins(table(dat$State, useNA ='ifany' ))
-```
-
-## Resistance Profile
-For lab approved isolates not associated with an outbreak (Surveillance ==1 & Exclude ==0 & LabApproval ==1), we will categorize resistance. Note, the field **SurveillanceReportable** is a flag variable for cases with Surveillance ==1 & Exclude ==0 & LabApproval ==1, so I'm going to use that for brevity. 
-
-First, we will update the subpop1 variable according to the instructions Layne provided. 
-This flag should be 1 for cases that have a SurveillanceReportable value of 1 AND have 
-a non-missing or unknown ResistancePattern.
-```{r}
-dat$SubPopNew<-dat$SurveillanceReportable==1 & !is.na(dat$ResistancePattern)
-dat$subpop1<-NULL
-```
-
-There are `r sum(dat$SubPopNew==T, na.rm=T)` cases that are had a primary purpose of surveillance, 
-were lab approved, were not excluded and have antibiotic resistance information. These isolates are 
-part of the NARMS surveillance scheme and are included in official NARMS reports.
-
-Resistance is grouped into the following variables (not mutually exclusive):
+**Resistance is grouped into the following variables (not mutually exclusive):**
 
 Resistance Type | Definition     | New Field Name
 --------------- | -------------- | --------------
@@ -124,117 +102,150 @@ Multidrug-R     | AMP_Concl & AZM_Concl & CIP_Concl & COT_Concl ='R' | MDR
 Extensive Drug-R | MDR==T & AXO_Concl=='R' | XDR
 
 *Resistance does not include intermediate results, with the exception of the Ciprofloxacin-R category.* 
+
 ```{r}
-#Individual categories of antibiotic resistance
-dat[SubPopNew ==1, c("AmpR", 'AzmR', "CipDSC", "CipR", "CotR",  'AxoR') := 
-      list(AMP_Concl=='R', 
-           AZM_Concl=='R',
-           CIP_Concl %in% c('I', 'R'),
-           CIP_Concl=='R',
-           COT_Concl=='R', 
-           AXO_Concl=='R')]
-
-#Number of antibiotic resistance categories, multi-drug and x-drug resistant
-abxlist<-paste0(c('AMP', 'AZM', 'CIP', 'COT', 'AXO'), "_Concl")
-dat[SubPopNew==1, AbxResSum :=rowSums(.SD=='R', na.rm=T), .SDcols=abxlist]
-
-#Multi-drug resistance
-dat[SubPopNew==1, MDR := rowSums(.SD=='R', na.rm=T)==4, .SDcols=abxlist[1:4]]
-
-#X-drug resistance
-dat[SubPopNew==1, XDR := MDR==T & AXO_Concl=='R']
-
-#No drug resistance
-dat[SubPopNew==1, NoAbxRes := AbxResSum == 0]
+dat <- dat %>% 
+  left_join(narms, join_by(SLabsID))
 ```
 
-Of those cases, there are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extensive drug resistance. 
+There are **`r sum(dat$SubPop==T, na.rm=T)`** cases that are had a primary purpose of surveillance, 
+were lab approved, were not excluded, and have antibiotic resistance information. These isolates are 
+part of the NARMS surveillance scheme and are included in official NARMS reports.
 
-### Age density by antibiotic resistance category
-```{r, echo=F}
-temp<-rbind(data.frame(Age=na.exclude(dat$AgeClean[dat$AmpR==T]), Resistance='Ampicillin'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$AzmR==T]), Resistance='Azithromycin'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CipDSC==T]), Resistance='Ciprofloxacin-DSC'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CipR==T]), Resistance='Ciprofloxacin-R'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$CotR==T]), Resistance='Cotrimoxazole'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$AxoR==T]), Resistance='Ceftriaxone'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$MDR==T]), Resistance='Multi-Drug'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$XDR==T]), Resistance='XDR'),
-            data.frame(Age=na.exclude(dat$AgeClean[dat$NoAbxRes==T]), Resistance='None'))
+There are a total of `r sum(dat$AbxResSum>2, na.rm=T)` cases that were resistant to three or more antibiotics, `r sum(dat$MDR==T, na.rm=T)` cases of multidrug resistance, and `r sum(dat$XDR==T, na.rm=T)` cases of extensive drug resistance. 
 
-ggplot(temp, aes(x=Age, color=Resistance)) +
-  geom_density(alpha=0.4, size=1.2)
+# Demographic variables
 
-setDT(temp)
-t2<-temp[, list(N=.N, Min=min(Age), Mean=mean(Age), Median=median(Age), Max=max(Age)), by='Resistance']
-t2 %>%
-   kbl() %>%
-   kable_minimal()
+## Age group
+
+AgeGroup is derived from the **Age** field in the FoodNet dataset if available, and the **narms_age** field from the NARMS dataset if Age is missing.  
+
+```{r}
+agegroupfunc<-function(x)(as.numeric(cut(x, breaks=c(0, 5, 18, 30, 40, 50, 199), right=F)))
+                                     
+dat <- dat %>%
+  mutate(AgeGroup=ifelse(is.na(Age), agegroupfunc(narms_age), agegroupfunc(Age)),
+         AgeGroup=factor(AgeGroup, levels=1:6,labels=c('0-4','5-17','18-29','30-39','40-49','50+')))
+
+dat$AgeGroup[is.na(dat$AgeGroup) & dat$AgeUnit=='Months']<-'0-4'
 ```
 
-## Calculate measures of severity
-### Fever
+There are `r sum(is.na(dat$AgeGroup))` records with a missing AgeGroup value. 
+
+## Sex
+There are a few cases with unknown Sex that have a value for Gender and/or PatientSexFromPulseNet. 
+```{r}
+dat <- dat %>%
+  mutate(Sex=ifelse(Sex==" ", "U", Sex), 
+         Gender=ifelse(trimws(Gender)=="", "U", Gender),
+         PatientSexFromPulsenet=ifelse(PatientSexFromPulsenet=="", "UNKNOWN", PatientSexFromPulsenet), 
+         Sex=ifelse(Sex %in% c('U', NA) & Gender %in% c('M', 'F'), Gender, 
+             ifelse(Sex %in% c('U', NA) & Gender == "U" & PatientAgeFromPulsenet %in% c('MALE', 'FEMALE'),
+                    substr(PatientAgeFromPulsenet, 1, 1), Sex)))
+
+```
+
+There are `r sum(dat$Sex=='U')` case with an unknown sex. 
+
+## Race and ethnicity
+
+**Crosstab of race by ethnicity**
+```{r}
+table(dat$Race, dat$Ethnicity, useNA='ifany')
+```
+
+**Classfication of race and ethnicity with American Indian/Alaska Native and Pacific Islander and Native Hawaiian top-coded over ethnicity**
+```{r}
+dat <- dat %>%
+  mutate(RacEthGroupA = factor(
+           ifelse(Race=='W' & Ethnicity=='N', 1,
+           ifelse(Race=='I', 2,
+           ifelse(Race=='A' & Ethnicity=='N', 3, 
+           ifelse(Race=='B' & Ethnicity=='N', 4, 
+           ifelse(Race=='P', 5, 
+           ifelse(Race=='M' & Ethnicity=='N', 6,
+           ifelse(Race=='O' & Ethnicity=='N', 7,
+           ifelse(Race %in% c('A', 'B', 'M', 'O', 'U', 'W') & Ethnicity=='H', 8, 9)))))))),
+           levels = 1:9  ,
+           labels=c('White-NH', 'AmInd-AKNat', 'Asian-NH', 'Black-NH', 'NatHwn-PI', 
+                    'Multiracial-NH', 'Other-NH', 'Hispanic', 'Unknown')),
+         RaceGroupB = factor(
+           ifelse(Race=='W', 1, 
+           ifelse(Race=='I', 2,
+           ifelse(Race %in% c('A', 'P'), 3,
+           ifelse(Race=='B', 4,
+           ifelse(Race=='M', 5, 6))))), 
+           levels = 1:6,
+           labels = c('White', 'Am Ind-AK Native', 'Asian-Pac Isldr', 'Black',
+                      'Mltracial', 'Otr and Unkwn')))
+```
+
+Number of cases within each race and ethnicity category
+```{r}
+dat %>% group_by(RacEthGroupA) %>% count()
+```
+Number of cases within each race category (does not classify by ethnicity)
+```{r}
+dat %>% group_by(RaceGroupB) %>% count()
+```
+
+# Disease severity
+
+## Fever
 ```{r}
 dat$Fever[is.na(dat$Fever)]<-'UNKNOWN'
 ```
 
 Fever include patients with a value of "YES" for Fever. There are `r sum(dat$Fever=="YES", na.rm=T)` cases with fever. 
 
-### Hospitalization
-First, we will verify that dates of admission or discharge to a hospital are within the surveillance period. In other words, we will make sure that these are all plausible dates.  
+## Hospitalization
+Verify that dates of admission or discharge to a hospital are within the surveillance period.
 ```{r}
 dates<-c('DtAdmit', 'DtDisch', 'DtAdmit2', 'DtDisch2')
-dat[, (dates) := lapply(.SD, as.Date, format="%m/%d/%Y"), .SDcols = c(dates)]
+dat[, (dates) := lapply(.SD, function(x) as.Date(as.numeric(x), origin='1899-12-30')), .SDcols = c(dates)]
 dat[, lapply(.SD, min, na.rm=T), .SDcols = c(dates)]
 dat[, lapply(.SD, max, na.rm=T), .SDcols = c(dates)]
 ```
 
-Looks good, so we will define hospitalization as any record with a value of YES for Hospital or HospTrans or a non-missing admit or discharge date (initial or second admit/discharge). 
+Define hospitalization as any record with a value of YES for Hospital or HospTrans or a non-missing admit or discharge date (initial or second admit/discharge). 
 ```{r}
 dat[, HospClean := Hospital=='YES'|HospTrans=='YES'|rowSums(is.na(.SD), na.rm=T)<4, .SDcols=c(dates)]
 ```
-There are `r sum(dat$HospClean==T)` records that were hospitalized. 
 
-### Bloody diarrhea
+There are `r sum(dat$HospClean==T)` cases that were hospitalized. 
+
+## Bloody diarrhea
 Bloody diarrhea includes records with a value of "YES" for BloodyDiarr. 
 ```{r}
 dat$BloodyDiarr[is.na(dat$BloodyDiarr)]<-'UNKNOWN'
 ```
+
 There are `r sum(dat$BloodyDiarr=="YES", na.rm=T)` cases with bloody diarrhea. 
 
-### Bacteremia
-There are three fields for specimen source (SpecimenSource, SourceSite, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. 
+## Bacteremia
+There are three fields for specimen source (SpecimenSource, SourceSiteFromPulsenet, and SpecSrce) which have a "Blood" category.  The SpecSrce field is the CDC-derived field and is the most complete. 
 ```{r}
-dat$Bacteremia<-dat$SpecimenSource=='Blood'
-dat$Bacteremia[is.na(dat$Bacteremia) & dat$SpecSrce=='BLOOD']<-T
-dat$Bacteremia[is.na(dat$Bacteremia) & dat$SourceSite=='Blood']<-T
-dat$Bacteremia[is.na(dat$Bacteremia)]<-F
+dat <- dat %>%
+  mutate(Bacteremia= 
+           ifelse(SpecimenSource=='Blood' | SpecSrce=='BLOOD'| SourceSiteFromPulsenet=='Blood', T, F))
 ```
 There are `r sum(dat$Bacteremia==T, na.rm=T)` cases with bacteremia. 
 
-### Death
+## Death
 ```{r}
 dat$Death<-dat$Outcome=='DEAD'
 ```
 There are `r sum(dat$Death==T, na.rm=T)` cases that died. 
 
-### Overall Severity (1+ Severity Classifications)
+## Overall Severity (1+ Severity Classifications)
 ```{r}
 dat$Severe<-dat$Fever=='YES'| dat$HospClean==T | dat$BloodyDiarr=='YES'| dat$Bacteremia==T | dat$Death==T
 ```
 There are `r sum(dat$Severe==T, na.rm=T)` cases were classified as severe. 
 
-# Select Fields for Analysis and Output
-***
-Due to the size of the merged dataset, we will restrict columns to only those that will be used for analysis.
-```{r}
-columns<-openxlsx::read.xlsx('//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Data Dictionaries/dataset_columns.xlsx')
-keep<-columns$Name[columns$Remove==F]
-final<-dat[, ..keep]
-```
-
+### Output final analytic dataset
 ```{r}
 options(scipen=500)
-write.csv(dat, "//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/analytic_file_V6.csv", row.names=F)
+write.csv(dat, paste0(folder, "analytic_file_final_5192023.csv"), row.names=F)
 ```
 
