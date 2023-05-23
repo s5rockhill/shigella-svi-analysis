@@ -39,27 +39,27 @@ pop<-melt(pop, id.vars = c("state", "county", 'age', 'racesex', 'hispanic'),
 # Create new demographic fields
 #-------------------------------------------------------------------------------
 AgeGroupLabs<-c('0-4', '5-14', '15-44', '45+')
-pop[, 'AgeGroup' := cut(age, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs)]
+pop[, 'AgeRange' := cut(age, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs)]
 
 svibreaks<-c(2000, 2006, 2011, 2015, 2017, 2020)
 svilabels<-c('2000', '2010', '2014', '2016', '2018')
 pop[,'sviyear' := cut(as.numeric(str_sub(year, -4)), breaks=svibreaks, right=F, labels=svilabels)]
 
-pop[, 'raceeth' := ifelse(hispanic==1 & racesex < 3, 'nh-white', 
-                    ifelse(hispanic==1 & racesex %in% 3:4, 'nh-black',
-                      ifelse(hispanic==1 & racesex %in% 5:6, 'nh-amerin',
-                        ifelse(hispanic==1 & racesex >6, 'nh-asian',
-                          ifelse(hispanic==2, 'hisp', NA)))))]
+pop[, 'raceeth' := ifelse(hispanic==1 & racesex < 3, 'White-NH', 
+                    ifelse(hispanic==1 & racesex %in% 3:4, 'Black-NH',
+                      ifelse(racesex %in% 5:6, 'AmInd-AKNat',
+                        ifelse(hispanic==1 & racesex >6, 'Asian, NH and PI',
+                               'Hispanic'))))]
 
 pop[, 'GEOID' := paste0(state, county)]
 
 #-------------------------------------------------------------------------------
 # Sum over age, time period and race/ethncity
 #-------------------------------------------------------------------------------
-pop<-pop[, list(Pop=sum(Pop)), by=list(GEOID, sviyear, raceeth, AgeGroup)]
+pop<-pop[, list(Pop=sum(Pop)), by=list(GEOID, sviyear, raceeth, AgeRange)]
 
 #-------------------------------------------------------------------------------
 #output dataset
 #-------------------------------------------------------------------------------
 setwd('//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet Population Data/')
-write.csv(pop, 'nchs_pop_est_by_county.csv',row.names = F)
+write.csv(pop, 'nchs_pop_est_by_county_aian_topcode.csv',row.names = F)
