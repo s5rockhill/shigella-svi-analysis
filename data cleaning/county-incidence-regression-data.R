@@ -37,23 +37,23 @@ dat[, 'raceeth' := ifelse(RacEthGroupA %in% c('Asian-NH', 'NatHwn-PI'), 'Asian, 
 #-------------------------------------------------------------------------------
 # Sum cases by year, county, age group, and race/ethnicity category 
 #-------------------------------------------------------------------------------
-CaseCounts<-dat[, list(Cases=.N), by=list(sviyear, GEOID, AgeGroup, raceeth)]
+CaseCounts<-dat[, list(Cases=.N), by=list(sviyear, GEOID, AgeRange, raceeth)]
 
-#Drop unknown, multiracial and unknown race 
-CaseCounts<-subset(CaseCounts, raceeth != 'Other-Unknown-multi')
+#Drop unknown, multiracial and unknown race and missing age 
+CaseCounts<-subset(CaseCounts, raceeth != 'Other-Unknown-multi' & !is.na(AgeRange))
 
 #-------------------------------------------------------------------------------
 # Import 2004-2019 County population data for foodnet surveillance area
 #-------------------------------------------------------------------------------
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet Population Data/'
 
-pop<-setDT(read.csv(paste0(folder, 'nchs_pop_est_by_county.csv'), 
+pop<-setDT(read.csv(paste0(folder, 'nchs_pop_est_by_county_aian_topcode.csv'), 
                       stringsAsFactors = F, colClasses = c("GEOID"='character')))
 #-------------------------------------------------------------------------------
 # Merge population and case counts. Executing a left join to keep tracts with 0 cases. 
 #-------------------------------------------------------------------------------
 pop$sviyear<-as.factor(pop$sviyear)
-fin<-merge(pop, CaseCounts, by = c('sviyear', 'GEOID', 'AgeGroup', 'raceeth'), all.x=T)
+fin<-merge(pop, CaseCounts, by = c('sviyear', 'GEOID', 'AgeRange', 'raceeth'), all.x=T)
 fin$Cases[is.na(fin$Cases)]<-0
 
 #Classify state
