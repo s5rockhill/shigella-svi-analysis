@@ -5,15 +5,16 @@ library('RODBC')
 library('tidycensus')
 
 #-------------------------------------------------------------------------------
-#Import shigella case data
+#Import shigella case data and create aggregation fields
 #-------------------------------------------------------------------------------
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet_NARMS/'
-dat<-setDT(read.csv(paste0(folder, "analytic_file_V7.csv"), stringsAsFactors = F,
+
+dat<-setDT(read.csv(paste0(folder, "analytic_file_final_5192023.csv"), stringsAsFactors = F,
                     colClasses = c('CTNO2000'='character', 'CTNO2010'='character')))
 
 #Classify age
 AgeGroupLabs<-c('0-4', '5-14', '15-44', '45+')
-dat$AgeGroup<-cut(dat$AgeClean, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs)
+dat$AgeRange<-cut(dat$Age, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs)
 
 #Update missing census tract information using deterministic imputation result
 dat[is.na(CTNO2000), CTNO2000 := Deterministic]
@@ -28,15 +29,13 @@ dat[,'sviyear' := cut(Year, breaks=svibreaks, right=F, labels=svilabels)]
 #Classify county
 dat[, GEOID := ifelse(Year<2006, str_sub(CTNO2000, 1, 5), str_sub(CTNO2010, 1, 5))]
 
-#Classify race and ethnicity
-dat[, 'raceeth' := ifelse(Ethnicity=='H', 'hisp', 
-                    ifelse(Ethnicity %in% c('N', 'U') & Race == 'I', 'nh-amerin', 
-                      ifelse(Ethnicity %in% c('N', 'U') & Race %in% c('A', 'P'), 'nh-asian',
-                        ifelse(Ethnicity %in% c('N', 'U') & Race == 'B', 'nh-black', 
-                          ifelse(Ethnicity %in% c('N', 'U') & Race == 'W', 'nh-white', 'Other-Unknown-multi')))))]
+#Classify race and ethnicity (top-coding american indian)
+dat[, 'raceeth' := ifelse(RacEthGroupA %in% c('Asian-NH', 'NatHwn-PI'), 'Asian, NH and PI',  
+                   ifelse(RacEthGroupA %in% c('Multiracial-NH', 'Other-NH', 'Unknown'),  'Other-Unknown-multi', 
+                    RacEthGroupA))]
 
 #-------------------------------------------------------------------------------
-# Sum cases by age group and sex for each race/ethnicity category 
+# Sum cases by year, county, age group, and race/ethnicity category 
 #-------------------------------------------------------------------------------
 CaseCounts<-dat[, list(Cases=.N), by=list(sviyear, GEOID, AgeGroup, raceeth)]
 
