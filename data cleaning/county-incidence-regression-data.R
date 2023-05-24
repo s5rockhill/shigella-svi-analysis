@@ -2,7 +2,6 @@ library('data.table')
 library('stringr')
 library('openxlsx')
 library('RODBC')
-library('tidycensus')
 
 #-------------------------------------------------------------------------------
 #Import shigella case data and create aggregation fields
@@ -62,48 +61,6 @@ fin[,'State':=factor(str_sub(GEOID, 1, 2),
                      labels=c('CA', 'CO', 'CT', 'GA', 'MD', 'MN', 'NM', 'NY', 'OR', 'TN'))]
 
 #-------------------------------------------------------------------------------
-# Import SVI datasets and calculate total SVI quartile
-#-------------------------------------------------------------------------------
-ch0 <- odbcDriverConnect("DSN=GRASP_MSSQL;UID=ppk8;DATABASE=sde_grasp_svi", rows_at_time = 1)
-ch1 <- odbcDriverConnect("DSN=GRASP_MSSQL;UID=ppk8;DATABASE=sde_grasp_svi_2010", rows_at_time = 1)
-ch2 <- odbcDriverConnect("DSN=GRASP_MSSQL;UID=ppk8;DATABASE=sde_grasp_svi_2014", rows_at_time = 1)
-ch3 <- odbcDriverConnect("DSN=GRASP_MSSQL;UID=ppk8;DATABASE=sde_grasp_svi_2016", rows_at_time = 1)
-ch4 <- odbcDriverConnect("DSN=GRASP_MSSQL;UID=ppk8;DATABASE=sde_grasp_svi_2018", rows_at_time = 1)
-
-svi00 <- sqlQuery(ch0, "SELECT STCOFIPS, USTP FROM sdeadmin.SVI2000_US_county", as.is=TRUE)
-svi10 <- sqlQuery(ch1, "SELECT FIPS, R_PL_THEMES FROM sdeadmin.SVI2010_US_county", as.is=TRUE)
-svi14 <- sqlQuery(ch2, "SELECT FIPS, RPL_THEMES FROM sdeadmin.SVICompiled_County_National", as.is=TRUE)
-svi16 <- sqlQuery(ch3, "SELECT FIPS, RPL_THEMES FROM sdeadmin.SVI2016_US_county", as.is=TRUE)
-svi18 <- sqlQuery(ch4, "SELECT FIPS, RPL_THEMES FROM sde.SVI2018_US_county", as.is=TRUE)
-
-on.exit(RODBC::odbcClose(ch0, ch1, ch2, ch3, ch4))
-
-#Combine 2000-2018 svi datasets
-names(svi00)<-names(svi14)
-names(svi10)<-names(svi14)
-
-svi00$sviyear<-2000
-svi10$sviyear<-2010
-svi14$sviyear<-2014
-svi16$sviyear<-2016
-svi18$sviyear<-2018
-
-svi_all<-setDT(rbind(svi00, svi10, svi14, svi16, svi18))
-rm(svi00, svi10, svi14, svi16, svi18)
-
-#Calculate quartile
-svi_all$RPL_THEMES<-round(as.numeric(svi_all$RPL_THEMES), 4)
-svi_all[svi_all==-999]<-NA
-svi_all[, quartile := cut(RPL_THEMES, breaks=c(0, .25, .5, .75, 1), include.lowest=T, labels=F), by='sviyear']
-
-#-------------------------------------------------------------------------------
-# Left join to SVI score based on Year/sviyear
-#-------------------------------------------------------------------------------
-names(svi_all)[names(svi_all)=='FIPS']<-'GEOID'
-fin[, sviyear := as.numeric(as.character(sviyear))]
-fin<-merge(fin, svi_all, by=c('GEOID', 'sviyear'), all.x=T)
-
-#-------------------------------------------------------------------------------
 #Import NCHS Urban-Rural classification and merge to data by STCNTY
 #-------------------------------------------------------------------------------
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/NCHS/'
@@ -113,6 +70,16 @@ nchs$UrCode<-nchs$`2013.code`
 
 fin<-merge(fin, nchs[,10:11], by='GEOID', all.x=T)
 names(fin)[names(fin)=='GEOID']<-'County'
+
+#-------------------------------------------------------------------------------
+# Merge to 2000-2018 SVI scores for FoodNet Counties 
+#-------------------------------------------------------------------------------
+source('helper funcs/calc-region-specific-svi-score.R')
+
+fin[, sviyear := as.numeric(as.character(sviyear))]
+fin<-fin %>%
+  left_join(svi_all[, c('Year', 'County', 'rpl', 'quartile')], 
+            join_by(County==County, sviyear==Year))
 
 ########################## END DATA PREPARATION  #####################################
 
