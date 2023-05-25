@@ -7,86 +7,36 @@ library('tidyverse')
 library('kableExtra')
 
 col_palette<-c('black', '#D55E00', '#0072B2', '#009E73')
-output.folder<-'//cdc.gov/project/ATS_GIS_Store12/Shigella_SVI/Preliminary Results/Charts/'
 #--------------------------------------------------------------------------------
 #Import county-level dataset 
 #--------------------------------------------------------------------------------
-setwd("//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/")
-cntydat<-read.csv('Final_County_ByRaceEth_2023-02-13.csv', colClasses = c('County'='character'))
+folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
+dat<-read.csv(paste0(folder, 'Final_County_ByRaceEth_2023-05-24.csv'), 
+                         colClasses = c('County'='character'))
 
 #formatting variables
-setDT(cntydat)[, c('sviyear','LabelRaceEth', 'UrCode')  := 
+racelabels<-c('White, NH','American Indian\n or AK Native', 'Asian or\n Pacific Islander, NH',
+              'Black, NH', 'Hispanic*')
+
+setDT(dat)[, c('sviyear','LabelRaceEth', 'UrCode')  := 
                  list(factor(sviyear),
-                      factor(raceeth, levels=c('nh-white', 'nh-black', 'nh-amerin', 'nh-asian', 'hisp'),
-                                      labels=c('White, NH',
-                                               'Black, NH',
-                                               'American Indian\n or AK Native, NH', 
-                                               'Asian or\n Pacific Islander, NH', 
-                                               'Hispanic')),
+                      
+                      factor(raceeth, 
+                             levels=c('White-NH', 'AmInd-AKNat', 'Asian, NH and PI', 
+                                      'Black-NH', 'Hispanic'),
+                             labels=racelabels),
+                      
                       factor(UrCode, levels=c(1:6), 
-                                     labels=c(rep('Large metro', 2), 'Medium metro', 'Small metro', rep('Rural',2))))]
+                             labels=c(rep('Large metro', 2), 'Medium metro', 'Small metro', rep('Rural',2))))]
 
-#--------------------------------------------------------------------------------
-#Summary statistics of rates/proportions by race/svi quartile
-#--------------------------------------------------------------------------------
-sumstats<-data.frame()
-for (i in c('LabelRaceEth', 'quartile', 'AgeGroup')) {
-      temp<-
-        cntydat[Pop>0, list(`One or more cases (%)`= sum(Cases>0)/.N*100,
-                             Minimum=min(Cases/Pop*100000),
-                              `25th percentile`=quantile(Cases/Pop*100000, 0.25),
-                               Median=quantile(Cases/Pop*100000, 0.50),
-                               Mean=mean(Cases/Pop*100000, na.rm=T),
-                              `75th percentile`=quantile(Cases/Pop*100000, 0.75),
-                              `95th percentile`=quantile(Cases/Pop*100000, .95),
-                              Maximum=max(Cases/Pop*100000)), by=eval(i)]
-      names(temp)[1]<-'Group'
-      sumstats<-rbind(sumstats, temp)
-}
-
-sumstats[, 2:9]<-sumstats[, lapply(.SD, sprintf, fmt="%0.1f"), .SDcols=names(sumstats)[-1]]
-sumstats[,'Group' := factor(Group, levels=c('White, NH', 'Black, NH', 'American Indian\n or AK Native, NH',
-                                            'Asian or\n Pacific Islander, NH', 'Hispanic', 1:4, '0-4',
-                                            '5-14', '15-44', '45+'))]
-sumstats<-sumstats[order(Group),]
-names(sumstats)[1]<-''
-
-
-kbl(na.omit(sumstats), align =c("l",  rep('r', 8))) %>%
-  kable_classic(full_width=F, font_size = 12) %>%
-  add_header_above(c(" "=2, "Rate per 100,000" = 7), bold=T) %>%
-  pack_rows('Race and Ethnicity', 1, 5) %>%
-  pack_rows('SVI Quartile', 6, 9) %>%
-  pack_rows('Age Group', 10, 13) %>%
-save_kable(paste0(output.folder, 'summary_stat_table1.png'))
-
-#--------------------------------------------------------------------------------
-#Data visualization
-#--------------------------------------------------------------------------------
-cntydat[Cases>0, list(Rate=sum(Cases)/sum(Pop)*100000), by=list(County, LabelRaceEth, quartile)] %>%
-  ggplot(aes(x=quartile, y=Rate))+
-  facet_grid(cols=vars(LabelRaceEth), scales='free')+
-  stat_summary(fun.data=mean_cl_boot,size=.7, color='#0072B2')+
-  coord_trans(y="log10")+
-  theme_light()+
-  labs(title = 'Average Shigella Incidence Rate by Social Vulnerability Index Quartile', 
-       subtitle= 'among counties with one or more cases') +
-  ylab('Log(Rate per 100K Residents)')+
-  xlab('Social Vulnerability Index Quartile')+
-  theme(legend.position = 'none', 
-        panel.grid.minor.x = element_blank(),
-        panel.grid.major.x = element_blank(),
-        strip.text.x=element_text(color='black', size=10, face="bold"))
-
-ggsave(paste0(output.folder, 'Incidence_by_Race_and_Quartile.png'), width=8, height=5, units='in')
 #--------------------------------------------------------------------------------
 #Multivariate analysis
 #--------------------------------------------------------------------------------
 #Drop counties without SVI data or population and split dataset by age group
-cntydat <- cntydat[!is.na(RPL_THEMES) & Pop>0] %>% split(.$AgeGroup)
+dat <- dat[!is.na(rpl) & Pop>0] %>% split(.$AgeRange)
 
 #Hurdle model for Age Group 0 - 4 Years (Null model)
-mod0a<-glmmTMB(Cases ~ 1 + offset(log(Pop)), zi=~., data=cntydat$`0-4`, family=truncated_nbinom2)
+mod0a<-glmmTMB(Cases ~ 1 + offset(log(Pop)), zi=~., data=dat$`0-4`, family=truncated_nbinom2)
 
 #Add state/county random effects
 mod0a.1<-update(mod0a, . ~ . + (1|State) + (1|State:County))
@@ -127,18 +77,18 @@ rm(mod0a, mod0a.1, mod1a.1, mod1a.2, mod1a.3, mod1a.4, mod2a, mod3a)
 simulationOutputa <- simulateResiduals(fittedModel = mod4a, plot=F) 
 plot(simulationOutputa)
 
-plotResiduals(simulationOutputa, form=na.omit(cntydat$`0-4`$LabelRaceEth))
-plotResiduals(simulationOutputa, form=na.omit(cntydat$`0-4`$quartile))
-plotResiduals(simulationOutputa, form=na.omit(cntydat$`0-4`$UrCode))
+plotResiduals(simulationOutputa, form=na.omit(dat$`0-4`$LabelRaceEth))
+plotResiduals(simulationOutputa, form=na.omit(dat$`0-4`$quartile))
+plotResiduals(simulationOutputa, form=na.omit(dat$`0-4`$UrCode))
 testDispersion(simulationOutputa = simulationOutput)
 testOutliers(simulationOutputa, type='bootstrap')
 
 #--------------------------------------------------------------------------------
 # Apply final model to all age groups
 #--------------------------------------------------------------------------------
-mod4b<-update(mod4a, . ~ ., data=cntydat$`5-14`)
-mod4c<-update(mod4a, . ~ ., data=cntydat$`15-44`)
-mod4d<-update(mod4a, . ~ ., data=cntydat$`45+`)
+mod4b<-update(mod4a, . ~ ., data=dat$`5-14`)
+mod4c<-update(mod4a, . ~ ., data=dat$`15-44`)
+mod4d<-update(mod4a, . ~ ., data=dat$`45+`)
 
 simulationOutputb <- simulateResiduals(fittedModel = mod4b, plot=F) 
 simulationOutputc <- simulateResiduals(fittedModel = mod4c, plot=F) 
@@ -243,7 +193,7 @@ zp1 <- predict(mod7a, type="zprob")
 cm1 <- predict(mod7a, type="conditional")
 mu1 <- predict(mod7a, type="response")
 
-cntydat[, mean(Cases>0), by='AgeGroup']
+dat[, mean(Cases>0), by='AgeGroup']
 
-cntydat[Cases>0, mean(Cases), by='AgeGroup']
+dat[Cases>0, mean(Cases), by='AgeGroup']
 mean(cm1 / (1 - exp(-cm1)))
