@@ -246,6 +246,7 @@ There are `r sum(dat$Severe==T, na.rm=T)` cases were classified as severe.
 ### Output final analytic dataset
 ```{r}
 options(scipen=500)
+folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/'
 write.csv(dat, paste0(folder, "analytic_file_final_5192023.csv"), row.names=F)
 ```
 
