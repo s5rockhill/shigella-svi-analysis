@@ -27,6 +27,7 @@ setDT(dat)
 ```
 
 # Data management
+       
 ```{r}
 #Missing values
 dat[dat=='.']<-NA
@@ -89,6 +90,24 @@ temp4[order(Year),]
 source('narms_data_prep.R')
 ```
 
+```{r}
+dat <- dat %>% 
+  left_join(narms, join_by(SLabsID))
+```
+
+# Filter out non-Shigella Gensus and Clean Serotype Classification
+This code filters out non-Shigella cases and fills in missing and unknown values in FinalSpeciesName using the serotypesummary field. The FoodNet Codebook states that the serotypesummary field is a CDC-cleaned version of SeroSite. Per the discussion with N. Logan (5/27/22), the FinalSpeciesName field should take precedence. 
+
+```{r}
+dat <- dat %>%
+  filter(FinalGenusName %in% c(NA, 'Shigella')) %>%
+  mutate(serotypesummary=ifelse(grepl('NOT S', serotypesummary)==T, 'UNKNOWN', serotypesummary),
+         SpeciesClean=ifelse(FinalSpeciesName %in% c(NA, 'unknown', 'other'), 
+                       tolower(word(serotypesummary, 1)), FinalSpeciesName))
+```
+                
+# Classify antibiotic resistance categories
+
 **Resistance is grouped into the following variables (not mutually exclusive):**
 
 Resistance Type | Definition     | New Field Name
@@ -102,11 +121,6 @@ Multidrug-R     | AMP_Concl & AZM_Concl & CIP_Concl & COT_Concl ='R' | MDR
 Extensive Drug-R | MDR==T & AXO_Concl=='R' | XDR
 
 *Resistance does not include intermediate results, with the exception of the Ciprofloxacin-R category.* 
-
-```{r}
-dat <- dat %>% 
-  left_join(narms, join_by(SLabsID))
-```
 
 There are **`r sum(dat$SubPop==T, na.rm=T)`** cases that are had a primary purpose of surveillance, 
 were lab approved, were not excluded, and have antibiotic resistance information. These isolates are 
