@@ -14,8 +14,8 @@ dat<-read.csv(paste0(folder, 'analytic_file_final_5192023.csv'))
 #--------------------------------------------------------------------------------
 #Formatting variables
 #--------------------------------------------------------------------------------
-racelabels<-c('American Indian\n or AK Native', 'Asian', 'Black', 
-              'Native Hawaiian\n or Pac. Islander', 'White', 'Multiracial', 
+racelabels<-c('American Indian or AK Native', 'Asian', 'Black', 
+              'Native Hawaiian or Pac. Islander', 'White', 'Multiracial', 
               'Other race', 'Unknown')
 
 dat <- dat %>%
@@ -60,8 +60,9 @@ t$Group = cell_spec(t$Group, bold=ifelse(t$Group=='Total', T, F))
 t %>%
   rename(' '= Group) %>%
   kbl( align =c("l",  rep('r', 2)), escape = F) %>%
-    kable_classic(full_width=F, font_size = 12) %>%
-    column_spec(1:3, width='3cm') %>%
+    kable_classic(full_width=F, font_size = 20) %>%
+    column_spec(1, width='8cm') %>%
+    column_spec(2:3, width='4cm') %>%
     row_spec(0, bold=T) %>%
     pack_rows('Sex', 2, 4) %>%
     pack_rows('Age Group', 5, 11) %>%
