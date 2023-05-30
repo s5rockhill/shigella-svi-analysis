@@ -9,7 +9,7 @@ col_palette<-c('black', '#D55E00', '#0072B2', '#009E73')
 #Import county-level dataset 
 #--------------------------------------------------------------------------------
 folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-cntydat<-read.csv(paste0(folder, 'Final_County_ByRaceEth_2023-05-24.csv'))
+cntydat<-read.csv(paste0(folder, 'Final_County_ByRaceEth_2023-05-30.csv'))
 
 #formatting variables
 racelabels<-c('White, NH','American Indian\n or AK Native', 'Asian or\n Pacific Islander, NH',
@@ -58,7 +58,7 @@ kbl(na.omit(sumstats), align =c("l",  rep('r', 8))) %>%
   pack_rows('SVI Quartile', 6, 9) %>%
   pack_rows('Age Group', 10, 13) %>%
   footnote(symbol = 'Excludes Hispanic American Indian and Alaska Native individuals') %>%
-  save_kable('analysis/incidence/charts/summary_stat_table1.png')
+  save_kable('charts/summary_stat_table1.png')
 
 #--------------------------------------------------------------------------------
 #Data visualization
@@ -80,4 +80,4 @@ cntydat[Cases>0, list(Rate=sum(Cases)/sum(Pop)*100000), by=list(County, LabelRac
         panel.grid.major.x = element_blank(),
         strip.text.x=element_text(color='black', size=10, face="bold"))
 
-ggsave('analysis/incidence/charts/Incidence_by_Race_and_Quartile.png', width=8, height=5, units='in')
+ggsave('charts/Incidence_by_Race_and_Quartile.png', width=8, height=5, units='in')
