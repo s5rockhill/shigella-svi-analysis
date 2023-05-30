@@ -27,6 +27,16 @@ setDT(cntydat)[, c('sviyear','LabelRaceEth', 'UrCode')  :=
                              labels=c(rep('Large metro', 2), 'Medium metro', 'Small metro', rep('Rural',2))))]
 
 #--------------------------------------------------------------------------------
+#Summary county-level statistics 
+#--------------------------------------------------------------------------------
+
+#Number of unique counties
+cntydat[, length(unique(County)), by='sviyear']
+
+#Number of unique counties with one or more shigella cases
+cntydat[Cases>0, length(unique(County)), by='AgeRange']
+
+#--------------------------------------------------------------------------------
 #Summary statistics of rates/proportions by race/svi quartile
 #--------------------------------------------------------------------------------
 sumstats<-data.frame()
