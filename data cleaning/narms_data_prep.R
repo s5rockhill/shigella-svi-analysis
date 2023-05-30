@@ -8,19 +8,9 @@ narms_file<-'FoodNet_1505_MERGED_NARMSData_No DUPS_2004 to 2019_v05.18.23.csv'
 narms<-read.csv(paste0(folder, narms_file), stringsAsFactors = F)
 
 #-------------------------------------------------------------------------------
-# Filter out non-Shigella Gensus and Clean Serotype Classification
+#Filter out non-Shigella cases
 #-------------------------------------------------------------------------------
-# This code filters out non-Shigella cases and fills in missing and unknown values 
-# in FinalSpeciesName using the serotypesummary field. The FoodNet Codebook states 
-# that the serotypesummary field is a CDC-cleaned version of SeroSite. Per the 
-# discussion with N. Logan (5/27/22), the FinalSpeciesName field should take precedence. 
-
-narms$serotypesummary[narms$serotypesummary=='NOT SPECIATED'] <- 'UNKNOWN'
-
-narms<-narms %>%
-  filter(FinalGenusName=='Shigella') %>%
-  mutate(SpeciesClean=ifelse(FinalSpeciesName %in% c(NA, 'unknown', 'other'), 
-                       tolower(word(serotypesummary, 1)), FinalSpeciesName))
+#narms<-narms %>% filter(FinalGenusName=='Shigella') 
 
 #-------------------------------------------------------------------------------
 # Resistance Profile
@@ -77,8 +67,5 @@ narms <- narms %>%
 #-------------------------------------------------------------------------------
 narms<-narms %>%
   select(SLabsID, narms_age, AgeUnit, PatientAgeFromPulsenet, PatientSexFromPulsenet,
-         Gender, SpeciesClean, SubPop, AmpR, AzmR, CipR, CipDSC, CotR, AxoR, 
+         Gender, FinalGenusName, FinalSpeciesName, SubPop, AmpR, AzmR, CipR, CipDSC, CotR, AxoR, 
          AbxResSum, MDR, XDR, NoAbxRes, SourceSiteFromPulsenet, SpecimenSource)
-
-              
-              
