@@ -2,6 +2,7 @@ library('data.table')
 library('stringr')
 library('openxlsx')
 library('RODBC')
+library('tigris')
 
 #-------------------------------------------------------------------------------
 #Import shigella case data and create aggregation fields
@@ -25,13 +26,20 @@ svibreaks<-c(2000, 2006, 2011, 2015, 2017, 2020)
 svilabels<-c('2000', '2010', '2014', '2016', '2018')
 dat[,'sviyear' := cut(Year, breaks=svibreaks, right=F, labels=svilabels)]
 
-#Classify county
-dat[, GEOID := ifelse(Year<2006, str_sub(CTNO2000, 1, 5), str_sub(CTNO2010, 1, 5))]
+#Classify county based on census tract GEOID if available and otherwise based on foodnet county
+data(fips_codes)
+fips_codes$county<-toupper(gsub(' County',"", fips_codes$county))
+dat$County[dat$County=='PRINCE GEORGES']<-"PRINCE GEORGE'S"
+dat <- dat %>%
+  left_join(fips_codes, join_by(State==state, County==county)) %>%
+  mutate(GEOID=ifelse(Year<2006, str_sub(CTNO2000, 1, 5), str_sub(CTNO2010, 1, 5))) %>%
+  mutate(GEOID=ifelse(is.na(GEOID), paste0(state_code, county_code), GEOID))
 
 #Classify race and ethnicity (top-coding american indian)
-dat[, 'raceeth' := ifelse(RacEthGroupA %in% c('Asian-NH', 'NatHwn-PI'), 'Asian, NH and PI',  
-                   ifelse(RacEthGroupA %in% c('Multiracial-NH', 'Other-NH', 'Unknown'),  'Other-Unknown-multi', 
-                    RacEthGroupA))]
+dat<- dat %>%
+  mutate(raceeth= ifelse(RacEthGroupA %in% c('Asian-NH', 'NatHwn-PI'), 'Asian, NH and PI',  
+                  ifelse(RacEthGroupA %in% c('Multiracial-NH', 'Other-NH', 'Unknown'),  'Other-Unknown-multi', 
+                  RacEthGroupA)))
 
 #-------------------------------------------------------------------------------
 # Sum cases by year, county, age group, and race/ethnicity category 
@@ -46,8 +54,8 @@ CaseCounts<-subset(CaseCounts, raceeth != 'Other-Unknown-multi' & !is.na(AgeRang
 #-------------------------------------------------------------------------------
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/FoodNet Population Data/'
 
-pop<-setDT(read.csv(paste0(folder, 'nchs_pop_est_by_county_aian_topcode.csv'), 
-                      stringsAsFactors = F, colClasses = c("GEOID"='character')))
+pop<-read.csv(paste0(folder, 'nchs_pop_est_by_county_aian_topcode.csv'), 
+                      stringsAsFactors = F, colClasses = c("GEOID"='character'))
 #-------------------------------------------------------------------------------
 # Merge population and case counts. Executing a left join to keep tracts with 0 cases. 
 #-------------------------------------------------------------------------------
@@ -56,9 +64,10 @@ fin<-merge(pop, CaseCounts, by = c('sviyear', 'GEOID', 'AgeRange', 'raceeth'), a
 fin$Cases[is.na(fin$Cases)]<-0
 
 #Classify state
-fin[,'State':=factor(str_sub(GEOID, 1, 2), 
-                     levels=c('06','08','09','13','24','27','35','36','41','47'),
-                     labels=c('CA', 'CO', 'CT', 'GA', 'MD', 'MN', 'NM', 'NY', 'OR', 'TN'))]
+fin<-fin %>%
+  mutate(State=factor(str_sub(GEOID, 1, 2), 
+                levels=c('06','08','09','13','24','27','35','36','41','47'),
+                 labels=c('CA', 'CO', 'CT', 'GA', 'MD', 'MN', 'NM', 'NY', 'OR', 'TN')))
 
 #-------------------------------------------------------------------------------
 #Import NCHS Urban-Rural classification and merge to data by STCNTY
@@ -76,7 +85,7 @@ names(fin)[names(fin)=='GEOID']<-'County'
 #-------------------------------------------------------------------------------
 source('helper funcs/calc-region-specific-svi-score.R')
 
-fin[, sviyear := as.numeric(as.character(sviyear))]
+fin$sviyear<-as.numeric(as.character(fin$sviyear))
 fin<-fin %>%
   left_join(svi_all[, c('Year', 'County', 'rpl', 'quartile')], 
             join_by(County==County, sviyear==Year))
