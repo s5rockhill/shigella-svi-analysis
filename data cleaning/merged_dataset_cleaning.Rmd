@@ -253,7 +253,9 @@ There are `r sum(dat$Death==T, na.rm=T)` cases that died.
 
 ## Overall Severity (1+ Severity Classifications)
 ```{r}
-dat$Severe<-dat$Fever=='YES'| dat$HospClean==T | dat$BloodyDiarr=='YES'| dat$Bacteremia==T | dat$Death==T
+dat<-dat %>%
+  mutate(Severe= case_when(Fever=='YES'|HospClean==T|HospClean==T |BloodyDiarr=='YES'|
+                           Bacteremia==T|Death==T  ~ T, TRUE ~ F))
 ```
 There are `r sum(dat$Severe==T, na.rm=T)` cases were classified as severe. 
 
