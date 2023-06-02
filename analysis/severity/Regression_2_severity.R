@@ -191,11 +191,11 @@ ggplot(newdata1, aes(x = rpl, y = PredProb)) +
 ggsave('charts/predicted_probs_severity_svi.png', width=8, height=6, units='in')
 
 #-------------------------------------------------------------------------------
-# Proportion of cases hospitalized by race/ethnicity
+# Proportion of cases classified as severe by race/ethnicity
 #-------------------------------------------------------------------------------
 dat %>%
   group_by(Race, Ethnicity)  %>%
-  summarise(Percent=sum(HospClean==T)/n()) %>%
+  summarise(Percent=sum(Severe==T)/n()) %>%
   ggplot(aes(x=Race, y=Percent, Group=Ethnicity))+
   facet_wrap(~Ethnicity, nrow=3) + 
   geom_bar(stat='identity', position = position_dodge(), aes(fill=Race)) + 
@@ -203,10 +203,12 @@ dat %>%
   geom_text(aes(label=scales::percent(round(Percent,2)), y=Percent), stat="identity", vjust=-.5) +
   scale_y_continuous(limits=c(0,1),labels = scales::percent) +
   ylab("Percent of Cases") +
-  labs(title='Percent of Shigella Cases Hospitalized by Race and Ethnicity')+
+  labs(title='Percent of Shigella Cases Classified as Severe by Race and Ethnicity')+
   theme_light()+
   theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
         panel.grid.minor.y = element_blank(),
+        legend.position = 'none',
         strip.background =element_rect(fill='gray25'))
+ggsave('charts/proportion-severe-race-ethnicity.png', width=8, height=8, units='in')
 
                                                                                                 
