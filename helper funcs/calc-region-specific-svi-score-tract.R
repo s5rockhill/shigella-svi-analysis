@@ -83,19 +83,19 @@ svi18 <- sqlQuery(ch4, "SELECT * FROM sde.SVI2018_US_tract", as.is=TRUE)
 #Keep fields used to calculate percentile rankings
 #-------------------------------------------------------------------------------
 svi00<-svi00 %>%
-  dplyr::select(FIPS, ends_with('R'), OldSVI=USTP, -STATE_ABBR)
+  dplyr::select(FIPS, ends_with('R'), -STATE_ABBR)
 
 svi10<-svi10 %>%
-  dplyr::select(FIPS, starts_with('E_P_') | starts_with('P_'), OldSVI=R_PL_THEMES)
+  dplyr::select(FIPS, starts_with('E_P_') | starts_with('P_'))
 
 svi14<-svi14 %>%
-  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR, OldSVI=RPL_THEMES)
+  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR)
 
 svi16<-svi16 %>%
-  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR, OldSVI=RPL_THEMES)
+  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR)
 
 svi18<-svi18 %>%
-  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR, OldSVI=RPL_THEMES)
+  dplyr::select(FIPS, starts_with('EP_'), -EP_UNINSUR)
 
 
 #-------------------------------------------------------------------------------
@@ -105,32 +105,57 @@ svi18<-svi18 %>%
 svi00<-svi00 %>%
   filter(FIPS %in% ctlist00$GEOID) %>%
   mutate(across(G1V1R:G4V5R, as.numeric)) %>%
-  mutate(sviyear=2000, rpl=sql_rank(rowSums(across(G1V1R:G4V5R, ~ sql_rank(.x))))) %>%
-  dplyr::select(sviyear, FIPS, rpl, OldSVI)
+  mutate(sviyear=2000, 
+         t1rpl=sql_rank(rowSums(across(G1V1R:G1V4R, ~ sql_rank(.x)))),
+         t2rpl=sql_rank(rowSums(across(G2V1R:G2V4R, ~ sql_rank(.x)))),
+         t3rpl=sql_rank(rowSums(across(G3V1R:G3V2R, ~ sql_rank(.x)))),
+         t4rpl=sql_rank(rowSums(across(G4V1R:G4V4R, ~ sql_rank(.x)))),
+         rpl=sql_rank(rowSums(across(G1V1R:G4V5R, ~ sql_rank(.x))))) %>%
+  dplyr::select(sviyear, FIPS, t1rpl, t2rpl, t3rpl, t4rpl, rpl)
   
 svi10<-svi10 %>%
   filter(FIPS %in% ctlist10$GEOID) %>%
   mutate(across(E_P_POV:P_GROUPQ, as.numeric)) %>%
-  mutate(sviyear=2010, rpl=sql_rank(rowSums(across(E_P_POV:P_GROUPQ, ~ sql_rank(.x))))) %>%
-  dplyr::select(sviyear, FIPS, rpl, OldSVI)
+  mutate(sviyear=2010, 
+         t1rpl=sql_rank(rowSums(across(E_P_POV:E_P_NOHSDIP, ~ sql_rank(.x)))),
+         t2rpl=sql_rank(rowSums(across(P_AGE65:P_SNGPRNT, ~ sql_rank(.x)))),
+         t3rpl=sql_rank(rowSums(across(c(P_MINORITY, E_P_LIMENG), ~ sql_rank(.x)))),
+         t4rpl=sql_rank(rowSums(across(c(E_P_MUNIT:E_P_NOVEH, P_GROUPQ), ~ sql_rank(.x)))),
+         rpl=sql_rank(rowSums(across(E_P_POV:P_GROUPQ, ~ sql_rank(.x))))) %>%
+  dplyr::select(sviyear, FIPS, t1rpl, t2rpl, t3rpl, t4rpl, rpl)
 
 svi14<-svi14 %>%
   filter(FIPS %in% ctlist10$GEOID) %>%
   mutate(across(EP_POV:EP_GROUPQ, as.numeric)) %>%
-  mutate(sviyear=2014, rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
-  dplyr::select(sviyear, FIPS, rpl, OldSVI)
+  mutate(sviyear=2014, 
+         t1rpl=sql_rank(rowSums(across(EP_POV:EP_NOHSDP, ~ sql_rank(.x)))),
+         t2rpl=sql_rank(rowSums(across(EP_AGE65:EP_SNGPNT, ~ sql_rank(.x)))),
+         t3rpl=sql_rank(rowSums(across(c(EP_MINRTY:EP_LIMENG), ~ sql_rank(.x)))),
+         t4rpl=sql_rank(rowSums(across(c(EP_MUNIT:EP_GROUPQ), ~ sql_rank(.x)))),
+         rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
+  dplyr::select(sviyear, FIPS, t1rpl, t2rpl, t3rpl, t4rpl, rpl)
 
 svi16<-svi16 %>%
   filter(FIPS %in% ctlist10$GEOID) %>%
   mutate(across(EP_POV:EP_GROUPQ, as.numeric)) %>%
-  mutate(sviyear=2016, rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
-  dplyr::select(sviyear, FIPS, rpl, OldSVI)
+  mutate(sviyear=2016, 
+         t1rpl=sql_rank(rowSums(across(EP_POV:EP_NOHSDP, ~ sql_rank(.x)))),
+         t2rpl=sql_rank(rowSums(across(EP_AGE65:EP_SNGPNT, ~ sql_rank(.x)))),
+         t3rpl=sql_rank(rowSums(across(c(EP_MINRTY:EP_LIMENG), ~ sql_rank(.x)))),
+         t4rpl=sql_rank(rowSums(across(c(EP_MUNIT:EP_GROUPQ), ~ sql_rank(.x)))),
+         rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
+  dplyr::select(sviyear, FIPS, t1rpl, t2rpl, t3rpl, t4rpl, rpl)
 
 svi18<-svi18 %>%
   filter(FIPS %in% ctlist10$GEOID) %>%
   mutate(across(EP_POV:EP_GROUPQ, as.numeric)) %>%
-  mutate(sviyear=2018, rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
-  dplyr::select(sviyear, FIPS, rpl, OldSVI)
+  mutate(sviyear=2018, 
+         t1rpl=sql_rank(rowSums(across(EP_POV:EP_NOHSDP, ~ sql_rank(.x)))),
+         t2rpl=sql_rank(rowSums(across(EP_AGE65:EP_SNGPNT, ~ sql_rank(.x)))),
+         t3rpl=sql_rank(rowSums(across(c(EP_MINRTY:EP_LIMENG), ~ sql_rank(.x)))),
+         t4rpl=sql_rank(rowSums(across(c(EP_MUNIT:EP_GROUPQ), ~ sql_rank(.x)))),
+         rpl=sql_rank(rowSums(across(EP_POV:EP_GROUPQ, ~ sql_rank(.x))))) %>%
+  dplyr::select(sviyear, FIPS, t1rpl, t2rpl, t3rpl, t4rpl, rpl)
 
 #-------------------------------------------------------------------------------
 #Combine 2000-2018 svi datasets and calculate quartiles
@@ -143,6 +168,9 @@ breaks<-c(0, .25, .5, .75, 1)
 
 svi_all<-svi_all %>%
   group_by(sviyear) %>%
-  mutate(quartile = cut(rpl, breaks=breaks, include.lowest=T, labels=F),
-         OldQuartile = cut(as.numeric(OldSVI), breaks=breaks, include.lowest=T, labels=F)) %>%
+  mutate(t1qrtile = cut(t1rpl, breaks=breaks, include.lowest=T, labels=F),
+         t2qrtile = cut(t2rpl, breaks=breaks, include.lowest=T, labels=F),
+         t3qrtile = cut(t3rpl, breaks=breaks, include.lowest=T, labels=F),
+         t4qrtile = cut(t4rpl, breaks=breaks, include.lowest=T, labels=F),
+         qrtile = cut(rpl, breaks=breaks, include.lowest=T, labels=F)) %>%
   ungroup()
