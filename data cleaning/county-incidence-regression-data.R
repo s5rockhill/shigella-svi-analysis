@@ -9,7 +9,7 @@ library('tigris')
 #-------------------------------------------------------------------------------
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/'
 
-dat<-setDT(read.csv(paste0(folder, "analytic_file_final_5192023.csv"), stringsAsFactors = F,
+dat<-setDT(read.csv(paste0(folder, "analytic_file_final_06062023.csv"), stringsAsFactors = F,
                     colClasses = c('CTNO2000'='character', 'CTNO2010'='character')))
 
 #Classify age
