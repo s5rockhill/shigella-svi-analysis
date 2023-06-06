@@ -83,12 +83,11 @@ names(fin)[names(fin)=='GEOID']<-'County'
 #-------------------------------------------------------------------------------
 # Merge to 2000-2018 SVI scores for FoodNet Counties 
 #-------------------------------------------------------------------------------
-source('helper funcs/calc-region-specific-svi-score.R')
+source('helper funcs/calc-region-specific-svi-score-county.R')
 
 fin$sviyear<-as.numeric(as.character(fin$sviyear))
 fin<-fin %>%
-  left_join(svi_all[, c('Year', 'County', 'rpl', 'quartile')], 
-            join_by(County==County, sviyear==Year))
+  left_join(svi_all, join_by(County==County, sviyear==Year))
 
 ########################## END DATA PREPARATION  #####################################
 
