@@ -6,6 +6,7 @@ library('kableExtra')
 library('dplyr')
 library('tidycensus')
 library('tidyr')
+library('colorspace')
 
 col_palette<-c('black', '#D55E00', '#0072B4', '#009E73', '#E69F00', '#56B4E9')
 #--------------------------------------------------------------------------------
@@ -142,7 +143,7 @@ dat %>%
   ggplot(aes(factor(`SVI Theme`), Score, Group=Severe)) +
   geom_boxplot(aes(fill=Severe))+
   #geom_violin(draw_quantiles = 0.50, bw=0.05, aes(fill=Severe)) +
-  scale_fill_manual(values=col_palette[c(5, 4)]) +
+  scale_fill_discrete_qualitative(palette = "Dark 3")+
   labs(title='Social Vulnerability Index Score by Shigella Severity',
        caption='Theme 1 = socioeconomic status \nTheme 2 = household composition \nTheme 3 = minority status and language \nTheme 4 = housing and transportation')+
   theme_light()+
@@ -162,7 +163,7 @@ dat %>%
                               't4rpl' = 'Theme 4')) %>%
   ggplot(aes(factor(`SVI Theme`), Score, Group=`Antimicrobial Resistance`)) +
   geom_boxplot(aes(fill=`Antimicrobial Resistance`))+
-  scale_fill_manual(values=col_palette[c(5, 4)]) +
+  scale_fill_discrete_qualitative(palette = "Dark 3")+
   labs(title='Social Vulnerability Index Score by Antimicrobial Resistance',
        caption='Theme 1 = socioeconomic status \nTheme 2 = household composition \nTheme 3 = minority status and language \nTheme 4 = housing and transportation')+
   theme_light()+
