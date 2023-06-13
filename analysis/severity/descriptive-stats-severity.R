@@ -25,8 +25,12 @@ svilabels<-c('2000', '2010', '2014', '2016', '2018')
 dat <- dat %>%
   mutate(FIPS =  ifelse(Year<2006, CTNO2000, CTNO2010), 
          sviyear = as.numeric(as.character(cut(Year, breaks=svibreaks, right=F, labels=svilabels))),
+         Race = factor(Race, levels=c('W', 'I', 'A', 'B', 'M', 'P', 'O', 'U' ),
+                       labels=c('White', 'American Indian and AK Native', 
+                                'Asian and Pacific Islander', 'Black', 'Multiracial',
+                                'Pacific Islander', 'Other Race', 'Unknown Race')),
          LabelRace = factor(RaceGroupB, 
-                            levels=c('White', 'Am Ind-AK Native', 'Asian-Pac Isldr', 'Black', 'Mltracial', 'Otr and Unkwn'),
+                             levels=c('White', 'Am Ind-AK Native', 'Asian-Pac Isldr', 'Black', 'Mltracial', 'Otr and Unkwn'),
                             labels=c('White', 'American Indian and AK Native', 'Asian and Pacific Islander', 
                                      'Black', 'Multiracial', 'Other and unknown')),
          Ethnicity = factor(Ethnicity, levels=c('N', 'H', 'U'), labels=c('non-Hispanic', 'Hispanic', 'Unknown')),
@@ -61,7 +65,7 @@ dat <-dat %>%  #Group years into periods
                     labels=c('2004-2007', '2008-2011', '2012-2015', '2016-2019')))
 
 #Frequencies of categorical fields and chi-square test
-dem.vars<-c('Sex', 'LabelRace', 'Ethnicity', 'Period', 'UrCode')
+dem.vars<-c('Sex', 'Race', 'Ethnicity', 'Period', 'UrCode', 'quartile')
 d<-data.frame()
 cs<-data.frame()
 for (i in dem.vars){
@@ -100,10 +104,12 @@ d %>%
     column_spec(1, '5cm') %>%
     column_spec(2:3, '3cm') %>%
     pack_rows('Sex', 1, 2) %>%
-    pack_rows('Race', 3, 8) %>%
-    pack_rows('Ethnicity', 9, 11) %>%
-    pack_rows('Year of Diagnosis', 12, 15) %>%
-    pack_rows('Urban-Rural Designation', 16, 19) %>%
+    pack_rows('Race', 3, 10) %>%
+    pack_rows('Ethnicity', 11, 13) %>%
+    pack_rows('Year of Diagnosis', 14, 17) %>%
+    pack_rows('Urban-Rural Designation', 18, 21) %>%
+    pack_rows('Social Vulnerability Index Quartile[note]', 22, 25) %>%
+    add_footnote("1=lowest social vulnerability; 4=highest vulnerability", notation = 'symbol') %>% 
     save_kable('charts/severity_demographics_table3_4.png')
 
 
