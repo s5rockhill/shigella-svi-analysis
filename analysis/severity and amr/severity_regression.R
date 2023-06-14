@@ -190,7 +190,7 @@ tsmod<-tsmod %>%
   mutate(aOR = sprintf("%0.2f", aOR),
          `95% CI`= paste0("(", sprintf("%0.2f", CI.2.5..), ' - ', sprintf("%0.2f", CI.97.5..), ")"),
          p=cut(p, breaks=c(0, 0.001, 0.01, 0.05, 1), labels=c('***', '**', '*', ''), right=F),
-         Parameters = gsub("^LabelRace|Sex|Urbanicity|t[1-4]", "", Parameters, perl=T),
+         Parameters = gsub("LabelRace|Sex|Urbanicity|t[1-4]", "", Parameters, perl=T),
          Parameters = gsub('rpl', 'Theme SVI Score', Parameters)) %>%
   select(Parameters, aOR, `95% CI`, p, Theme) %>%
   pivot_wider(names_from = Theme, values_from = c(aOR, `95% CI`, p), names_vary="slowest") 
