@@ -9,7 +9,7 @@ library('tidyr')
 #Import county-level dataset 
 #--------------------------------------------------------------------------------
 folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-dat<-read.csv(paste0(folder, 'analytic_file_final_06062023.csv'), stringsAsFactors = F,
+dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFactors = F,
               colClasses = c('CNTYFIPS'='character'))
 
 #--------------------------------------------------------------------------------
@@ -198,7 +198,7 @@ tsmod<-tsmod %>%
 
 names(tsmod)<-gsub('_Theme\\s[1-4]', "", names(tsmod))
 
-tsmod$Parameters=cell_spec(tsmod$Parameters, bold=ifelse(tsmod$Parameters%in% c("Age", "Year", "SVI Score"), T, F))
+tsmod$Parameters=cell_spec(tsmod$Parameters, bold=ifelse(tsmod$Parameters%in% c("Age", "Year", "Theme SVI Score"), T, F))
 
 kbl(tsmod, align =c("l",  rep('r', 12)), escape = F) %>%
   kable_classic(full_width=F, font_size = 14) %>%
