@@ -13,7 +13,7 @@ col_palette<-c('black', '#D55E00', '#0072B4', '#009E73', '#E69F00', '#56B4E9')
 #Import case-level dataset 
 #--------------------------------------------------------------------------------
 folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-dat<-read.csv(paste0(folder, 'analytic_file_final_06062023.csv'), stringsAsFactors = F,
+dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFactors = F,
               colClasses = c('CNTYFIPS'='character'))
 
 #--------------------------------------------------------------------------------
@@ -127,7 +127,7 @@ d %>%
     pack_rows('Race and Ethnicity', 3, 11) %>%
     pack_rows('Year of Diagnosis', 12, 15) %>%
     pack_rows('Urban-Rural Designation', 16, 19) %>%
-    save_kable('charts/case_level_demographics_table3_4.png')
+    save_kable('charts/case_level_demographics_table3_2A.png')
 
 
 #-------------------------------------------------------------------------------
@@ -150,7 +150,7 @@ dat %>%
   theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
         panel.grid.minor.y = element_blank(),
         plot.caption = element_text(hjust = 0, face = 'italic', size=9))
-ggsave('charts/SVI_Score_by_Severity_3A.png', width = 8, height = 5, units='in')
+ggsave('charts/SVI_Score_by_Severity_3_3A.png', width = 8, height = 5, units='in')
 
 
 dat %>%
@@ -170,7 +170,7 @@ dat %>%
   theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
         panel.grid.minor.y = element_blank(),
         plot.caption = element_text(hjust = 0, face = 'italic', size=9))
-ggsave('charts/SVI_Score_by_AbxRes_3A.png', width = 8, height = 5, units='in')
+ggsave('charts/SVI_Score_by_AbxRes_3_3A.png', width = 8, height = 5, units='in')
 
 
 #-------------------------------------------------------------------------------
@@ -180,26 +180,28 @@ ggsave('charts/SVI_Score_by_AbxRes_3A.png', width = 8, height = 5, units='in')
 quartile.labs <- c('1: Least Vulnerable', '2', '3', '4: Most Vulnerable')
 names(quartile.labs) <- c("1", "2", "3", "4")
 
+addline_format <- function(x,...){
+  gsub('\\s','\n',x)
+}
+
 dat %>%
-  filter(!is.na(quartile)) %>%
-  group_by(LabelRace, quartile) %>%
+  filter(!is.na(qrtile)) %>%
+  group_by(LabelRace, qrtile) %>%
   summarise(Total=n(), Severe=sum(Severe==T)) %>%
   mutate(Percent= Severe/Total, 
-         LabelRace=ifelse(LabelRace=='American Indian and AK Native', 'American Indian\n and AK Native',
-                          as.character(LabelRace))) %>%
+         LabelRace=addline_format(LabelRace)) %>%
   ggplot( aes(x=LabelRace, y=Percent))+
-    geom_bar(stat='identity', fill='#0072B2') + 
-    facet_grid(rows=vars(quartile), labeller=labeller(quartile=quartile.labs))+
-    geom_text(aes(label=sprintf("%.1f%%", Percent*100), y=Percent), stat="identity", vjust=-.5) +
+    geom_bar(stat='identity', fill=qualitative_hcl(2, palette = "Dark 3")[2]) + 
+    facet_grid(rows=vars(qrtile), labeller=labeller(qrtile=quartile.labs))+
+    geom_text(aes(label=sprintf("%.1f%%", Percent*100), y=Percent), stat="identity", vjust=-.5, size=3) +
     scale_y_continuous(limits=c(0,1), labels = scales::percent) +
     ylab("Percent of Cases") +
-    labs(title='Percent of Shigella Cases Classified as Severe by Race and SVI Quartile')+
+    labs(title='Percent of Shigella Cases Classified as Severe by Race/Ethnicity and SVI Quartile')+
     theme_light()+
     theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
           panel.grid.minor.y = element_blank(),
           strip.background =element_rect(fill='gray25'))
-ggsave('charts/Percent_Severe_by_Race_figure3_4A.png', width = 8, height = 7, units='in')
-
+ggsave('charts/Percent_Severe_by_Race_figure3_3B.png', width = 8, height = 7, units='in')
 
 
 #Table 3.4A
