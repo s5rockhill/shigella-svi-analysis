@@ -9,7 +9,7 @@ col_palette<-c('black', '#D55E00', '#0072B2', '#009E73')
 #Import final FoodNet case-level dataset
 #--------------------------------------------------------------------------------
 folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-dat<-read.csv(paste0(folder, 'analytic_file_final_5192023.csv'))
+dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'))
 
 #--------------------------------------------------------------------------------
 #Formatting variables
