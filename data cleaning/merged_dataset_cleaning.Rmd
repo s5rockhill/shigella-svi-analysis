@@ -252,9 +252,11 @@ dat$Death<-dat$Outcome=='DEAD'
 There are `r sum(dat$Death==T, na.rm=T)` cases that died. 
 
 ## Overall Severity (1+ Severity Classifications)
+
+Fevere has been excluded from the severity criteria due to the large proportion of cases with fever or unknown fever status. 
 ```{r}
 dat<-dat %>%
-  mutate(Severe= case_when(Fever=='YES'|HospClean==T|HospClean==T |BloodyDiarr=='YES'|
+  mutate(Severe= case_when(HospClean==T|HospClean==T |BloodyDiarr=='YES'|
                            Bacteremia==T|Death==T  ~ T, TRUE ~ F))
 ```
 There are `r sum(dat$Severe==T, na.rm=T)` cases were classified as severe. 
@@ -266,6 +268,12 @@ Update missing census tract information using deterministic imputation result
 dat[is.na(CTNO2000), CTNO2000 := Deterministic]
 dat[is.na(CTNO2010), CTNO2010 := Deterministic]
 dat$CTNO2000<-str_pad(dat$CTNO2000, width=11, side='left', pad='0')
+```
+
+Run region-specific SVI calculation code file
+
+```{r}
+source('C:/Users/ppk8/OneDrive - CDC/Shigella Project/shigella-svi-analysis/helper funcs/calc-region-specific-svi-score-tract.R')
 ```
 
 Classify cases by which year of svi we want to join SVI data to
@@ -285,6 +293,6 @@ dat <- dat %>%
 ```{r}
 options(scipen=500)
 folder<-'//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/'
-write.csv(dat, paste0(folder, "analytic_file_final_06062023.csv"), row.names=F)
+write.csv(dat, paste0(folder, "analytic_file_final_06162023.csv"), row.names=F)
 ```
 
