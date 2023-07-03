@@ -1,4 +1,4 @@
-library('data.table')
+library('dplyr')
 library('stringr')
 library('readr')
 
@@ -16,47 +16,48 @@ p09 <-read_fwf('icen_2000_09_y0509.txt', fwf_widths(c(8, 2, 3, 2, 1, 1, rep(8, 5
 p19<-read_fwf('pcen_v2020_y1020.txt', fwf_widths(c(4, 2, 3, 2, 1, 1, rep(8, 10)), cols[c(1:6, 17:26)]))
 
 #-------------------------------------------------------------------------------
-# Merge datasets and limit to FoodNet Counties
+# Merge datasets and limit to FoodNet Counties and collapse to long-form
 #-------------------------------------------------------------------------------
-pop<-merge(merge(p04, p09, by=cols[1:6]), p19, by=cols[2:6])
-
-pop<-subset(pop, state %in% c('09','13', '24', '27', '35', '41', '47') |
-              (state =='06' & county %in% c('001', '013', '075')) |
-              (state =='08' & county %in% c('001', '005', '013', '014', '031', '035', '059')) |
-              (state =='36' & county %in% c('001', '003', '009', '013', '015', '019', '021', '025', '029',
-                                       '031', '033', '035', '037', '039', '041', '051', '055', '057',
-                                       '063', '069', '073', '077', '083', '091', '093', '095', '097', 
-                                       '099', '101', '113', '115', '117', '121', '123')))
+pop <- p04 %>%
+  left_join(p09, join_by(state, county, age, racesex, hispanic)) %>%
+  left_join(p19, join_by(state, county, age, racesex, hispanic)) %>%
+  select(-starts_with('series')) %>%
+  filter(state %in% c('09','13', '24', '27', '35', '41', '47') |
+           (state =='06' & county %in% c('001', '013', '075')) |
+           (state =='08' & county %in% c('001', '005', '013', '014', '031', '035', '059')) |
+           (state =='36' & county %in% c('001', '003', '009', '013', '015', '019', '021', '025', '029',
+                                         '031', '033', '035', '037', '039', '041', '051', '055', '057',
+                                         '063', '069', '073', '077', '083', '091', '093', '095', '097', 
+                                         '099', '101', '113', '115', '117', '121', '123'))) %>%
+  pivot_longer(cols=Pop2000:Pop2019, names_to='year', values_to='Pop') 
 
 #-------------------------------------------------------------------------------
-# Collapse to long-form dataset
+# Filter out pre-2004 population data
 #-------------------------------------------------------------------------------
-setDT(pop)
-pop<-melt(pop, id.vars = c("state", "county", 'age', 'racesex', 'hispanic'),
-          measure.vars = c(cols[7:26]), variable.name = 'year', value.name = 'Pop')
-
+pop <- pop %>%
+  mutate(year=as.numeric(gsub('Pop', "", year))) %>%
+  filter(year>2003)
 #-------------------------------------------------------------------------------
 # Create new demographic fields
 #-------------------------------------------------------------------------------
 AgeGroupLabs<-c('0-4', '5-14', '15-44', '45+')
-pop[, 'AgeRange' := cut(age, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs)]
-
 svibreaks<-c(2000, 2006, 2011, 2015, 2017, 2020)
 svilabels<-c('2000', '2010', '2014', '2016', '2018')
-pop[,'sviyear' := cut(as.numeric(str_sub(year, -4)), breaks=svibreaks, right=F, labels=svilabels)]
 
-pop[, 'raceeth' := ifelse(hispanic==1 & racesex < 3, 'White-NH', 
+pop <- pop %>%
+  mutate(AgeRange = cut(age, breaks=c(0, 5, 15, 45, 999), right=F, labels=AgeGroupLabs),
+         sviyear = cut(year, breaks=svibreaks, right=F, labels=svilabels),
+         raceeth = ifelse(hispanic==1 & racesex < 3, 'White-NH', 
                     ifelse(hispanic==1 & racesex %in% 3:4, 'Black-NH',
                       ifelse(racesex %in% 5:6, 'AmInd-AKNat',
-                        ifelse(hispanic==1 & racesex >6, 'Asian, NH and PI',
-                               'Hispanic'))))]
-
-pop[, 'GEOID' := paste0(state, county)]
-
+                        ifelse(hispanic==1 & racesex >6, 'Asian, NH and PI', 'Hispanic')))),
+         GEOID = paste0(state, county))
 #-------------------------------------------------------------------------------
 # Sum over age, time period and race/ethncity
 #-------------------------------------------------------------------------------
-pop<-pop[, list(Pop=sum(Pop)), by=list(GEOID, sviyear, raceeth, AgeRange)]
+pop <- pop %>%
+  group_by(GEOID, sviyear, raceeth, AgeRange) %>%
+  summarise(Pop=sum(Pop))
 
 #-------------------------------------------------------------------------------
 #output dataset
