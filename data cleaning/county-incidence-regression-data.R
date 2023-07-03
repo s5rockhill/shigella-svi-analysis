@@ -120,7 +120,8 @@ fin <- fin %>%
 source('helper funcs/hifld_prisons.R')
 
 fin <- fin %>%
-  left_join(prisons_agg, join_by(County))
+  left_join(prisons_agg, join_by(County)) %>%
+  mutate(Prisons=replace_na(Prisons, 0), Capacity=replace_na(Capacity, 0))
 
 ########################## END DATA PREPARATION  #####################################
 
