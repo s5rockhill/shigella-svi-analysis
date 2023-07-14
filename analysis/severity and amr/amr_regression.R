@@ -9,8 +9,10 @@ library('tidyr')
 #Import final, cleaned FoodNet dataset 
 #--------------------------------------------------------------------------------
 folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-dat<-read.csv(paste0(folder, 'analytic_file_final_06062023.csv'), stringsAsFactors = F,
+dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFactors = F,
               colClasses = c('CNTYFIPS'='character'))
+
+dat <- dat %>% filter(Year>2015)
 
 #--------------------------------------------------------------------------------
 #Data cleaning
