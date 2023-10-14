@@ -2,5 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+*.html
 rsconnect/
 archive/
