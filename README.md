@@ -3,6 +3,8 @@
 
 This repository contains code for the preparation, quality assurance, and analysis of FoodNet surveillance data on shigella cases diagnosed between 2004 and 2019. FoodNet data was merged to PulseNet and the National Antimicrobial Resistance Monitoring System for Enteric Bacteria (NARMS) data. 
 
+[View interactive descriptive statistics in the here.]('https://s5rockhill.github.io/shigella-svi-analysis/')
+
 ## Contents
 
 ### aggregate population data
