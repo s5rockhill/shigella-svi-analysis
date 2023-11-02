@@ -24,7 +24,7 @@ dat <- dat %>%
                        labels=c('White', 'American Indian and AK Native', 
                                 'Asian and Pacific Islander', 'Black', 'Multiracial',
                                 'Pacific Islander', 'Other Race', 'Unknown Race')),
-         LabelRace = factor(RacEthGroupA, 
+         RaceLabeled = factor(RacEthGroupA, 
                 levels=c('White-NH', 'AmInd-AKNat', 'Asian-NH', 'Black-NH', 'Hispanic', 
                          'Multiracial-NH', 'NatHwn-PI',   'Other-NH',  'Unknown'),
                 labels=c('White, non-Hispanic', 
@@ -36,7 +36,9 @@ dat <- dat %>%
                          'Native Hawaiian and Pacific Islander',
                          'Other, non-Hispanic',
                          'Unknown')),
-         Sex = factor(Sex, levels=c('F', 'M'), labels=c('Female', 'Male'))) 
+         Sex = factor(Sex, levels=c('F', 'M'), labels=c('Female', 'Male')),
+         Diagnosed = ifelse(Year<2011, '2004-2010', '2011-2019'),
+         NARMS = ifelse(SubPop==T, 'Yes', 'No records') )
 
 #-------------------------------------------------------------------------------
 # Update CNTYFIPS Code based on reported County if missing
@@ -67,48 +69,66 @@ dat <- dat  %>%
 # Demographics of cases by severity and by antimicrobial resistance (any/none) 
 #-------------------------------------------------------------------------------
 dat <-dat %>%  #Group years into periods
-  mutate(Period = cut(Year, breaks=seq(2004, 2020, by=4), right=F, 
-                    labels=c('2004-2007', '2008-2011', '2012-2015', '2016-2019')))
+  mutate(Period = as.character(
+                    cut(Year, breaks=c(2004, 2011, 2015, 2020), right=F, 
+                    labels=c('2004-2010', '2011-2014', '2015-2019'))))
 
 #Frequencies of categorical fields and chi-square test
-dem.vars<-c('Sex', 'LabelRace', 'Period', 'UrCode')
+dem.vars<-c('Sex', 'RaceLabeled', 'Period', 'UrCode')
 
-d<-data.frame()
+sev<-data.frame()
+amr<-data.frame()
 
 for (i in dem.vars){
-  d<-rbind(d, cbind(Group=i, 
-                       with(dat, table(get(i), Severe)),
-                        p_sev=with(dat, chisq.test(table(get(i), Severe))$p.value),
-                       with(dat, table(get(i), AbxResSum>0)),
-                        p_amr=with(dat, chisq.test(table(get(i), AbxResSum>0))$p.value))
-      )
+  sev<-rbind(sev, 
+           cbind(
+              Group=i, 
+              with(dat[dat$Year>2010,], table(get(i), Severe)),
+              p_sev=with(dat[dat$Year>2010,], chisq.test(table(get(i), Severe))$p.value)
+            )
+          )
 } 
+
+for (i in dem.vars){
+  amr<-rbind(amr, 
+             cbind(Group=i, 
+                    with(dat, table(get(i), AbxResSum>0)),
+                    p_amr=with(dat, chisq.test(table(get(i), AbxResSum>0))$p.value)
+                   )
+              )
+} 
+
+d<-merge(sev, amr, by='row.names', all=T)
 
 #-------------------------------------------------------------------------------  
 #Format and output categorical results table
 #-------------------------------------------------------------------------------
-d[, 2:7]<-lapply(d[, 2:7], as.numeric)
-names(d)[2:7]<-c("NS", 'S', 'p_sev',  "NR", "R", 'p_amr')
+d<-d %>%
+  select(Category=Row.names, 
+         Group=Group.y, 
+         NS=FALSE.x, S=TRUE.x, p_sev, 
+         NR=FALSE.y, R=TRUE.y, p_amr) %>%
+  mutate_at(3:8, as.numeric) %>%
+  group_by(Group) %>%
+  fill(p_sev, .direction = 'up') #fill in p-value for severity for the 2004-2010 row (for formatting)
 
 plabels<-c("<0.001", "<0.01", '<0.05', ' ')
 
 d<-d %>%
   mutate(
-        across(c(p_sev, p_amr), \(x) cut(as.numeric(x), breaks=c(0, 0.001, 0.01, 0.05, 1), 
-                                         right=F, labels=plabels)),
-         Values=row.names(.),
+        across(c(p_sev, p_amr), \(x) 
+               cut(x, breaks=c(0, 0.001, 0.01, 0.05, 1), right=F, labels=plabels)),
          Severe = paste0(S, " (", sprintf("%0.1f", S/(S+NS)*100), ")"),
          NonSevere= paste0(NS, " (", sprintf("%0.1f", NS/(S+NS)*100), ")"),
          Resistant= paste0(R, " (", sprintf("%0.1f", R/(R+NR)*100), ")"),
          NotResistant= paste0(NR, " (", sprintf("%0.1f", NR/(R+NR)*100), ")")) %>%
-  select(Group, Values, Severe, NonSevere, p_sev, Resistant, NotResistant, p_amr )
-
-row.names(d)<-NULL
+  select(Group, Category, Severe, NonSevere, p_sev, Resistant, NotResistant, p_amr )
 
 d<- d %>%
   group_by(Group) %>%
   mutate(across(c(p_sev, p_amr), \(x) ifelse(row_number()==1, as.character(x), "")))%>%
   ungroup()%>%
+  arrange(Group, Category) %>%
   select(-Group)
 
 names(d)<-c(' ', rep(c('N (Percent)', 'N (Percent)', 'p'), 2))
@@ -118,15 +138,15 @@ d %>%
     kable_classic(full_width=F, font_size = 14) %>%
     add_header_above(c(' '=1, 'Yes'=1, 'No'=1, ' '=1, 'Yes'=1, 'No'=1, ' '=1), 
                      bold=T, font_size = 14) %>%
-  add_header_above(c(' '=1, 'Severe Shigella\n(N=38930)'=3,  
+  add_header_above(c(' '=1, 'Severe Shigella\n(N=22277)'=3,  
                      'Reistant to One or More Antimicrobials\n(N=1252)'=3), bold=T, font_size = 16) %>%
     column_spec(1, '6cm') %>%
     column_spec(2:3, '3cm') %>%
     column_spec(5:6, '3cm') %>%
-    pack_rows('Sex', 1, 2) %>%
-    pack_rows('Race and Ethnicity', 3, 11) %>%
-    pack_rows('Year of Diagnosis', 12, 15) %>%
-    pack_rows('Urban-Rural Designation', 16, 19) %>%
+    pack_rows('Year of Diagnosis', 1, 3) %>%
+    pack_rows('Race and Ethnicity', 4, 12) %>%
+    pack_rows('Sex', 13, 14) %>%
+    pack_rows('Urban-Rural Designation', 15, 18) %>%
     save_kable('charts/case_level_demographics_table3_2A.png')
 
 
@@ -135,6 +155,7 @@ d %>%
 #-------------------------------------------------------------------------------
 
 dat %>%
+  filter(Year>2010) %>%
   select(Severe, rpl, t1rpl, t2rpl, t3rpl, t4rpl) %>%
   gather(key="SVI Theme", value="Score",  -Severe) %>%
   mutate(`SVI Theme` = recode(`SVI Theme`,  'rpl' = 'Overall','t1rpl' = 'Theme 1',
@@ -150,7 +171,7 @@ dat %>%
   theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
         panel.grid.minor.y = element_blank(),
         plot.caption = element_text(hjust = 0, face = 'italic', size=9))
-ggsave('charts/SVI_Score_by_Severity_3_3A.png', width = 8, height = 5, units='in')
+ggsave('charts/Severity/SVI_Score_by_Severity_3_3A.png', width = 8, height = 5, units='in')
 
 
 dat %>%
@@ -170,7 +191,7 @@ dat %>%
   theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
         panel.grid.minor.y = element_blank(),
         plot.caption = element_text(hjust = 0, face = 'italic', size=9))
-ggsave('charts/SVI_Score_by_AbxRes_3_3A.png', width = 8, height = 5, units='in')
+ggsave('charts/AMR/SVI_Score_by_AbxRes_3_3A.png', width = 8, height = 5, units='in')
 
 
 #-------------------------------------------------------------------------------
@@ -185,12 +206,12 @@ addline_format <- function(x,...){
 }
 
 dat %>%
-  filter(!is.na(qrtile)) %>%
-  group_by(LabelRace, qrtile) %>%
+  filter(Year>2010 & !is.na(qrtile)) %>%
+  group_by(RaceLabeled, qrtile) %>%
   summarise(Total=n(), Severe=sum(Severe==T)) %>%
   mutate(Percent= Severe/Total, 
-         LabelRace=addline_format(LabelRace)) %>%
-  ggplot( aes(x=LabelRace, y=Percent))+
+         RaceLabeled=addline_format(RaceLabeled)) %>%
+  ggplot( aes(x=RaceLabeled, y=Percent))+
     geom_bar(stat='identity', fill=qualitative_hcl(2, palette = "Dark 3")[2]) + 
     facet_grid(rows=vars(qrtile), labeller=labeller(qrtile=quartile.labs))+
     geom_text(aes(label=sprintf("%.1f%%", Percent*100), y=Percent), stat="identity", vjust=-.5, size=3) +
@@ -201,7 +222,7 @@ dat %>%
     theme(axis.title.x = element_blank(), panel.grid.major.x = element_blank(),
           panel.grid.minor.y = element_blank(),
           strip.background =element_rect(fill='gray25'))
-ggsave('charts/Percent_Severe_by_Race_figure3_3B.png', width = 8, height = 7, units='in')
+ggsave('charts/Severity/Percent_Severe_by_Race_figure3_3B.png', width = 8, height = 7, units='in')
 
 
 #Table 3.4A
