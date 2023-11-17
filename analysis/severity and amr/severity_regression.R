@@ -16,6 +16,7 @@ dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFacto
 #Data cleaning
 #--------------------------------------------------------------------------------
 dat <- dat %>%
+  filter(Year>2010) %>%
   mutate(LabelRace = factor(RacEthGroupA, 
                             levels=c('White-NH', 'AmInd-AKNat', 'Asian-NH', 'Black-NH', 'Hispanic', 
                                      'Multiracial-NH', 'NatHwn-PI',   'Other-NH',  'Unknown'),
@@ -158,8 +159,7 @@ kbl(t2, align =c("l",  rep('r', 6)), escape = F) %>%
   pack_rows('Urbanicity (Ref: Rural)', 12, 14) %>%
   pack_rows('SVI Score/Race and Ethnicity Interaction', 16, 23) %>%
   footnote(general = "*** p < 0.001, ** p < 0.01, * p < 0.05")  %>%
-  save_kable('charts/severity_ORestimates_table3_4A.png')
-
+  save_kable('charts/Severity/severity_ORestimates_table3_4A.png')
 
 #-------------------------------------------------------------------------------
 # Theme-specific SVI Scores
