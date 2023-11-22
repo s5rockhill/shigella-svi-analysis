@@ -12,7 +12,7 @@ folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Fi
 dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFactors = F,
               colClasses = c('CNTYFIPS'='character'))
 
-dat <- dat %>% filter(Year>2015)
+#dat <- dat %>% filter(Year>2015)
 
 #--------------------------------------------------------------------------------
 #Data cleaning
@@ -103,23 +103,23 @@ m0<-glm(AMR ~ 1, data=nmdat, family = 'binomial')
 m1<-update(m0, . ~ . + Year)
 anova(m0, m1, test='Chisq')
 
-m2<-update(m1, . ~ . + Sex)
+m2<-update(m1, . ~ . + LabelRace)
 anova(m1, m2, test='Chisq')
 
-m3<-update(m2, . ~ . + Age)
-anova(m2, m3, test='Chisq')
+m3<-update(m2, . ~ . + rpl) 
+anova(m3, m2, test='Chisq')
 
-m4<-update(m3, . ~ . + LabelRace)
+m4<-update(m3, . ~ . + Sex)
 anova(m3, m4, test='Chisq')
 
-m5<-update(m4, . ~ . + rpl) 
+m5<-update(m4, . ~ . + Age)
 anova(m4, m5, test='Chisq')
 
-m6<-update(m5, . ~ . + LabelRace*rpl) 
+m6<-update(m5, . ~ . + LabelRace*rpl) # < NOT SIGNIFICANT
 anova(m5, m6, test='Chisq')
 
-m7<-update(m6, . ~ . + Urbanicity) 
-anova(m6, m7, test='Chisq')
+m7<-update(m5, . ~ . + Urbanicity) 
+anova(m5, m7, test='Chisq')
 
 #Summary and output from best fit model 
 finmod<-m7
@@ -142,12 +142,19 @@ t2<-t2 %>%
                           paste0("(", sprintf("%0.2f", CI.2.5..), ' - ', sprintf("%0.2f", CI.97.5..), ")"),
                           "-"), 
          OR = ifelse(na>0, "-", sprintf("%0.2f", OR)), 
-         p=cut(p, breaks=c(0, 0.001, 0.01, 0.05, 1), labels=c('***', '**', '*', ''), right=F),
+         p=as.character(
+            cut(p, breaks=c(0, 0.001, 0.01, 0.05, 1), 
+                   labels=c('***', '**', '*', ''), 
+                   right=F)
+            ),
          #Parameters = gsub("^Race|Ethnicity(?=Hispanic|Unknown)|Sex|UrCode", "", Parameters, perl=T), 
          Parameters = gsub("^LabelRace|Sex|Urbanicity", "", Parameters, perl=T),
          Parameters = gsub('rpl', 'SVI Score', Parameters)) %>%
   select(Parameters, OR, `95% CI`, p, Model) %>%
-  pivot_wider(names_from = Model, values_from = c(OR, `95% CI`, p), names_vary="slowest") %>%
+  pivot_wider(names_from = Model, 
+              values_from = c(OR, `95% CI`, p), 
+              names_vary="slowest", 
+              values_fill = "-") %>%
   rename(aOR=OR_Multivariate) 
 
 names(t2)<-gsub('_Univariate|_Multivariate', "", names(t2))
@@ -172,15 +179,15 @@ kbl(t2, align =c("l",  rep('r', 6)), escape = F) %>%
   footnote(general = "*** p < 0.001, ** p < 0.01, * p < 0.05
 Undefined estimates are suppressed (-).
 AMR = antimicrobial resistance")  %>%
-  save_kable('charts/amr_ORestimates_table3_4A.png')
+  save_kable('charts/AMR/amr_ORestimates_table3_4A.png')
 
 #-------------------------------------------------------------------------------
 # Theme-specific SVI Scores
 #-------------------------------------------------------------------------------
-tsmod1<-update(finmod, . ~ . -rpl -LabelRace*rpl + t1rpl+ LabelRace*t1rpl) 
-tsmod2<-update(finmod, . ~ . -rpl -LabelRace*rpl + t2rpl+ LabelRace*t2rpl) 
-tsmod3<-update(finmod, . ~ . -rpl -LabelRace*rpl + t3rpl+ LabelRace*t3rpl) 
-tsmod4<-update(finmod, . ~ . -rpl -LabelRace*rpl + t4rpl+ LabelRace*t4rpl) 
+tsmod1<-update(finmod, . ~ . -rpl + t1rpl) 
+tsmod2<-update(finmod, . ~ . -rpl + t2rpl) 
+tsmod3<-update(finmod, . ~ . -rpl + t3rpl) 
+tsmod4<-update(finmod, . ~ . -rpl + t4rpl) 
 
 model.list<-list(tsmod1, tsmod2, tsmod3, tsmod4)
 names(model.list)<-c('Theme 1', 'Theme 2', 'Theme 3', 'Theme 4')
@@ -213,7 +220,7 @@ tsmod<-tsmod %>%
   pivot_wider(names_from = Theme, values_from = c(aOR, `95% CI`, p), names_vary="slowest") 
 
 names(tsmod)<-gsub('_Theme\\s[1-4]', "", names(tsmod))
-
+tsmod<-tsmod[c(8, 1:7), ]
 tsmod$Parameters=cell_spec(tsmod$Parameters, bold=ifelse(tsmod$Parameters=="Theme SVI Score", T, F))
 
 kbl(tsmod, align =c("l",  rep('r', 12)), escape = F) %>%
@@ -224,13 +231,13 @@ kbl(tsmod, align =c("l",  rep('r', 12)), escape = F) %>%
   column_spec(c(2, 5, 8, 11), width = '0.6in') %>%
   column_spec(c(3, 6, 9, 12), width = '1in') %>%
   column_spec(c(4, 7, 10, 13), width = '0.6') %>%
-  pack_rows('Race and Ethnicity (Ref: White, non-Hispanic)', 2, 8) %>%
-  pack_rows('SVI Score/Race and Ethnicity Interaction', 9, 15) %>%
+  pack_rows('Race and Ethnicity (Ref: White, non-Hispanic)', 2, 7) %>%
+  #pack_rows('SVI Score/Race and Ethnicity Interaction', 9, 15) %>%
   footnote(general = "All models are adjusted for year, age, sex, and urban-rural classification of residence county.
 *** p < 0.001, ** p < 0.01, * p < 0.05") %>%
   add_footnote(c('Socioeconomic status', 'Household composition', 
                  'Minority status and language', 'Housing and transportation'),  notation='symbol') %>%
-  save_kable('charts/amr_themeORs_table3_4B.png')
+  save_kable('charts/AMR/amr_themeORs_table3_4B.png')
 
 #-------------------------------------------------------------------------------
 #Visualize predicted probabilities of Severe Shigella over values of SVI score by race
