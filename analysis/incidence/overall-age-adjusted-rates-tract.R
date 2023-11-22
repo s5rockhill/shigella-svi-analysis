@@ -1,10 +1,10 @@
 library('dplyr')
-library('epitools')
-library('ggthemes')
-library('data.table')
+library('ggplot2')
+#library('ggthemes')
+#library('data.table')
 library('tidyverse')
-library('kableExtra')
-library('ggsci')
+#library('kableExtra')
+#library('ggsci')
 
 #--------------------------------------------------------------------------------
 #Import census tract population data
@@ -54,18 +54,23 @@ dat<-read.csv(paste0(folder, 'analytic_file_final_06162023.csv'), stringsAsFacto
 #--------------------------------------------------------------------------------
 AgeLabs<-c('0-4', '5-14', '15-24', '25-34', '35-44', '45-54', '55-64', '65-74','75-84', '85+')
 dat <- dat %>%
-  mutate(AgeStd=cut(Age, breaks=c(0, 5, seq(15, 85, by=10), 999), right=F, labels=AgeLabs))
+  mutate(AgeStd=cut(Age, 
+                    breaks=c(0, 5, seq(15, 85, by=10), 999), 
+                    right=F, 
+                    labels=AgeLabs))
 
 #--------------------------------------------------------------------------------
 # Sum Shigella cases by census tract, standard age categories, and period of 
 # diagnosis (sviyear) for each race and for each ethnicity
 #--------------------------------------------------------------------------------
 t<-dat %>%
+  filter(!is.na(FIPS) & !is.na(AgeStd)) %>%
   group_by(FIPS, AgeStd, sviyear, Race) %>%
   summarise(Ethnicity='All', Cases=n()) %>%
-  rbind(dat %>%
-          group_by(FIPS, AgeStd, sviyear, Ethnicity) %>%
-          summarise(Race='All', Cases=n()) )
+    rbind(dat %>%
+            filter(!is.na(FIPS) & !is.na(AgeStd)) %>%
+            group_by(FIPS, AgeStd, sviyear, Ethnicity) %>%
+            summarise(Race='All', Cases=n()) )
 
 #--------------------------------------------------------------------------------
 # Merge tabulated cases with population totals 
@@ -75,154 +80,143 @@ pop <- pop %>%
   mutate(Cases = ifelse(is.na(Cases), 0, Cases))
 
 #--------------------------------------------------------------------------------
-# Import SVI data and calculate region scores
+# Import SVI data, calculate region-specific scores, and link to pop/case data
 #--------------------------------------------------------------------------------
-
 source('helper funcs/calc-region-specific-svi-score-tract.R')
 
-#--------------------------------------------------------------------------------
-# Link population/case data to SVI data
-#--------------------------------------------------------------------------------
 pop <- pop %>%
   left_join(select(svi_all, sviyear, FIPS, t1qrtile:qrtile),
             join_by(GEOID==FIPS, sviyear))
 
 #--------------------------------------------------------------------------------
 # Calculate age-adjusted rate for each race and ethnicity and SVI Theme Quartile
+# Uses a modification of the ageadjust.direct function from the epiTools package
+# that also outputs the variance of the direct standardized rate using the 
 #--------------------------------------------------------------------------------
-pop<-pop %>% mutate(AgeStd=factor(AgeStd), levels=AgeLabs, ordered=T)
+# Load direct age adjustment helper function
+source("./helper funcs/ageadjust rate direct method with variance.R.")
 
-std.pop<-data.frame(AgeStd= as.factor(AgeLabs), 
-                    Population=c(18986520, 39976619, 38076743, 37233437, 44659185, 
-                                 37030152, 23961506, 18135514,  12314793, 4259173))
+# Source U.S. Standard Population (2000) from NCI SEER
+stdpop<-read.fwf(url('https://seer.cancer.gov/stdpopulations/stdpop.18ages.txt'),
+                 widths = c(3, 3, 8), col.names = c('V1', 'AgeGrp', 'Pop')) %>%
+        filter(V1==204) %>%
+        mutate(AgeStd=cut(AgeGrp, breaks=(c(0, seq(from=1, to=19, by=2))), labels=AgeLabs)) %>%
+        group_by(AgeStd) %>%
+        summarise(Pop=sum(Pop))
+
+#Calculate age-adjusted rates, confidence intervals and variance of rates by race
 race <- pop %>%
-  filter(!Race %in% c('All', 'U') & !is.na(qrtile)) %>%
-  group_by(qrtile, Race, AgeStd) %>%
+  filter(Race != 'All' & !is.na(qrtile)) %>%
+  group_by(qrtile, Category=Race, AgeStd) %>%
   summarise(Pop=sum(Pop), Cases=sum(Cases)) %>%
-  group_by(qrtile, Race) %>%
-  mutate()
-  summarise(ageadjust.direct(count=Cases, pop=Pop, stdpop = std.pop))
+  group_by(qrtile, Category) %>%
+  reframe(Adj.Rate=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['adj.rate'],
+          lci=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['lci'],
+          uci=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['uci'],
+          var=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['variance'])
 
-pop<-pop[, list(pop=sum(estimate), moe=tidycensus::moe_sum(moe, estimate=estimate, na.rm=T)),
-         by=c('Year', 'State', 'GEOID', 'AgeStd')]
-
-folder<-"//cdc.gov/project/ATS_GIS_Store4/Projects/prj06135_Shigella_SVI/Data/Final Datasets/"
-cntydat<-read.csv(paste0(folder, 'Final_County_AgeAdjusted_ByRaceEth.csv'), 
-                  colClasses = c('County'='character'))
-
-#formatting variables
-racelabels<-c('White, NH','American Indian\n or AK Native', 'Asian or\n Pacific Islander, NH',
-              'Black, NH', 'Hispanic*')
-
-setDT(cntydat)[, c('sviyear','LabelRaceEth', 'UrCode')  := 
-                 list(factor(sviyear),
-                      
-                      factor(raceeth, 
-                             levels=c('White-NH', 'AmInd-AKNat', 'Asian, NH and PI', 
-                                      'Black-NH', 'Hispanic'),
-                             labels=racelabels),
-                      
-                      factor(UrCode, levels=c(1:6), 
-                             labels=c(rep('Large metro', 2), 'Medium metro', 'Small metro', rep('Rural',2))))]
-
-
-
+#Calculate age-adjusted rates, confidence intervals and variance of rates by ethnicity
+ethn <- pop %>%
+  filter(Ethnicity != 'All' & !is.na(qrtile)) %>%
+  group_by(qrtile, Category=Ethnicity, AgeStd) %>%
+  summarise(Pop=sum(Pop), Cases=sum(Cases)) %>%
+  group_by(qrtile, Category) %>%
+  reframe(Adj.Rate=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['adj.rate'],
+          lci=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['lci'],
+          uci=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['uci'],
+          var=age.adjust.direct.var(Cases, Pop, stdpop =stdpop$Pop)['variance'])
 
 #--------------------------------------------------------------------------------
-#Table: Summary statistics of rates/proportions by race/svi quartile
+# Calculate rate ratios and 95% confidence intervals using white and 
+# non-Hispanic as reference categories for race/ethnicity with each quartile
 #--------------------------------------------------------------------------------
-varlist<- c('qrtile', 't1qrtile', 't2qrtile', 't3qrtile', 't4qrtile')
-sumstats<-data.frame()
-for (i in varlist) {
-  temp<- cntydat %>%
-    filter(Pop>0) %>%
-    group_by(get(i), LabelRaceEth) %>%
-    summarise(
-          `1+ cases (%)`= sum(AdjCases>0)/n()*100,
-           Mean=mean(AdjCases/Pop*100000, na.rm=T),
-           Median=quantile(AdjCases/Pop*100000, 0.50),
-           Min=min(AdjCases/Pop*100000),
-           Max=max(AdjCases/Pop*100000)) %>%
-    mutate(Category=i)
+race <- race %>%
+  group_by(qrtile) %>%
+  mutate(RR = Adj.Rate/Adj.Rate[Category=='W'], 
+         RRvar = ((var/Adj.Rate^2)+(var[Category=='W']/Adj.Rate[Category=='W']^2)),
+         RRlci=exp(log(RR)-1.96*sqrt(RRvar)),
+         RRuci=exp(log(RR)+1.96*sqrt(RRvar)))
+
+ethn <- ethn %>%
+  group_by(qrtile) %>%
+  mutate(RR = Adj.Rate/Adj.Rate[Category=='N'], 
+         RRvar = ((var/Adj.Rate^2)+(var[Category=='N']/Adj.Rate[Category=='N']^2)),
+         RRlci=exp(log(RR)-1.96*sqrt(RRvar)),
+         RRuci=exp(log(RR)+1.96*sqrt(RRvar)))
+
+#--------------------------------------------------------------------------------
+# Combine race and ethnicity tables and format Category
+#--------------------------------------------------------------------------------
+# Format race categories and sort
+racelabels<-c('White', 'American Indian, AK Native', 'Asian', 'Black', 
+              'Multiracial', 'Native Hawaiian, Pacific Islander', 'Other race', 
+              'Non-Hispanic', 'Hispanic')
+
+result<-rbind(race, ethn) %>%
+      mutate(Category=factor(Category, 
+                      levels = c('W', 'I', 'A', 'B', 'M', 'P', 'O', 'N', 'H'),
+                      labels = racelabels)) %>%
+  arrange(Category)
+#--------------------------------------------------------------------------------
+# Format and output table
+#--------------------------------------------------------------------------------
+
+# Format rates, rate ratios, and confidence intervals for tables
+OutTable <- result %>%
+      mutate(
+        across(Adj.Rate:uci, ~sprintf("%1.2f", round(.x*100000, 3))),
+        across(RR:RRuci, ~sprintf( "%1.2f", .x)),
+        Rate.CI = paste0("(", lci, '-',  uci, ")"),
+        RR.CI = paste0("(",  RRlci, '-', RRuci, ")")
+        ) %>%
+      select(Quartile=qrtile, Category, Rate=Adj.Rate, Rate.CI, RR, RR.CI) %>%
+      pivot_wider(names_from = Quartile,
+                  values_from = c(Rate, Rate.CI, RR, RR.CI),
+                  names_vary = 'slowest')
+write.csv(OutTable, 'charts/Incidence/Age-adjusted/age_adj_rate_aggregate.csv', row.names = F)
+#--------------------------------------------------------------------------------
+# Charts of rates 
+#--------------------------------------------------------------------------------
+result %>%
+  arrange(desc(Category)) %>%
+  mutate(
+    across(Adj.Rate:uci, ~round(.x*100000, 3)),
+    qrtile = factor(qrtile, levels=1:4, labels=paste('Quartile', 1:4))) %>%
+  ggplot(aes(x=Adj.Rate, y=Category)) +
+    geom_point(shape=15, size=3) +
+    geom_linerange(aes(xmin=lci, xmax=uci)) +
+    facet_wrap(~qrtile) +
+  labs(title='Age-Adjusted Rate of Shigellosis by Race, Ethnicity and SVI Quartile',
+       subtitle = 'FoodNet Data, 2004-2019',
+       x = 'Rate per 100K residents')+
+  theme_linedraw() +
+  theme(plot.title = element_text(hjust=5.7), 
+        plot.subtitle = element_text(hjust = -0.5),
+        axis.title.y = element_blank(),
+        panel.grid.major = element_line(color='gray', linewidth = 0.5),
+        panel.grid.minor = element_blank())
   
-  names(temp)[1]<-'Group'
-  sumstats<-rbind(sumstats, temp)
-}
-
-#Format result table
-sumtab<-sumstats %>%
-  mutate(across(c(`1+ cases (%)`:Max), ~ sprintf("%0.1f", .x)),
-    Category=factor(Category,levels=varlist, labels=c('Overall', paste('Theme',1:4))),
-    Range = paste(Min, "-", Max)) %>%
-  select(Category, LabelRaceEth, Group, `1+ cases (%)`,  Mean, Median, Range) %>%
-  arrange(Category, LabelRaceEth, Group) %>%
-  filter(!is.na(Group)) %>%
-  pivot_wider(id_cols = c(Category, LabelRaceEth), names_from = Group, 
-              values_from = c(`1+ cases (%)`, Mean, Median),
-              names_vary = 'slowest') 
-
-names(sumtab)<-gsub("_[1-4]|LabelRaceEth", "", names(sumtab))
-
-#Print results table
-kbl(sumtab[, 2:14], align =c("l",  rep('r', 13))) %>%
-  kable_classic(full_width=T, font_size = 14) %>%
-  add_header_above(c(" "=1, rep(c(" "=1, "Rate per 100,000" = 2), 4))) %>%
-  add_header_above(c(" "=1, "Quartile 1"=3, "Quartile 2"=3, "Quartile 3"=3, "Quartile 4"=3), bold=T) %>%
-  pack_rows('Overall Score', 1, 5) %>%
-  pack_rows('Theme 1 Score', 6, 10) %>%
-  pack_rows('Theme 2 Score', 11, 15) %>%
-  pack_rows('Theme 3 Score', 16, 20) %>%
-  pack_rows('Theme 4 Score', 21, 25) %>%
-  footnote(symbol = 'Excludes Hispanic American Indian and Alaska Native individuals') %>%
-  save_kable('charts/summary_stat_table_bysvitheme.png')
-
 #--------------------------------------------------------------------------------
-#Chart: Summary statistics of rates/proportions by race/svi quartile
+# Forest plot of rate ratios
 #--------------------------------------------------------------------------------
-sumstats<-data.frame()
-for (i in varlist) {
-  temp<- cntydat %>%
-    filter(Pop>0) %>%
-    group_by(get(i), LabelRaceEth, County) %>%
-    summarise( Rate = sum(AdjCases)/sum(Pop)*100000) %>%
-    mutate(Category=i)
-  names(temp)[1]<-'Quartile'
-  sumstats<-rbind(sumstats, temp)
-}
+result %>%
+  filter(! Category %in% c('White', 'Non-Hispanic')) %>%
+  arrange(desc(Category)) %>%
+  mutate(
+    qrtile = factor(qrtile, levels=1:4, labels=paste('Quartile', 1:4))) %>%
+  ggplot(aes(x=RR, y=Category)) +
+  geom_point(shape=15, size=3) +
+  geom_linerange(aes(xmin=RRlci, xmax=RRuci)) +
+  geom_vline(xintercept = 1, linetype="dashed") +
+  facet_wrap(~qrtile) +
+  labs(title='Shigellosis Rate Ratio by Race, Ethnicity and SVI Quartile',
+       subtitle = 'FoodNet Data, 2004-2019',
+       x = 'Rate Ratio')+
+  theme_classic() +
+  theme(plot.title = element_text(hjust=-3.25), 
+        plot.subtitle = element_text(hjust = -0.5),
+        axis.title.y = element_blank(),
+        strip.background = element_rect('black'),
+        strip.text = element_text(color='white'))
 
-sumstats$Category<-factor(sumstats$Category,levels=varlist, 
-                          labels=c('Overall', 'Theme 1 (Socioeconomic Status)',
-                                   'Theme 2 (Household Characteristics)', 
-                                   'Theme 3 (Racial and Ethnic Minority Status)', 
-                                   'Theme 4 (Housing Type and Transportation)'))
-themelist<-unique(sumstats$Category)
 
-plots<-list()
-for (i in 1:length(themelist)) {
- plots[[i]]<- sumstats %>%
-    filter(Category==themelist[i]) %>%
-    ggplot(aes(x=Quartile, y=Rate))+
-      facet_grid(cols=vars(LabelRaceEth),  scales='free')+
-      stat_summary(fun.data=mean_cl_boot,size=.7)+
-      coord_trans(y="log10")+
-      theme_light()+
-      scale_color_nejm()+
-      labs(title = paste0('Average Shigella Incidence Rate by Race and Ethnicity and\n',
-                        'Social Vulnerability Index ', themelist[i], ' Quartile'))+ 
-           #,subtitle= 'among counties with one or more cases') +
-      ylab('Log(Rate per 100K Residents)')+
-      xlab('Social Vulnerability Index Quartile')+
-      labs(caption = "*Excludes Hispanic American Indian and Alaska Native individuals") +
-      theme(legend.position = 'none', 
-            plot.caption = element_text(hjust = 0),
-            plot.title = element_text(size=14, face='bold', color='#002E40'),
-            panel.grid.minor.x = element_blank(),
-            panel.grid.major.x = element_blank(),
-            strip.text=element_text(color='black', size=10, face="bold"))
-}  
-
-ggsave('charts/Incidence/Age-adjusted/Incidence_by_Race_and_OverallQuartile.png', plot=plots[[1]], width=8, height=5, units='in')
-ggsave('charts/Incidence/Age-adjusted/Incidence_by_Race_and_Theme1Quartile.png', plot=plots[[2]], width=8, height=5, units='in')
-ggsave('charts/Incidence/Age-adjusted/Incidence_by_Race_and_Theme2Quartile.png', plot=plots[[3]], width=8, height=5, units='in')
-ggsave('charts/Incidence/Age-adjusted/Incidence_by_Race_and_Theme3Quartile.png', plot=plots[[4]], width=8, height=5, units='in')
-ggsave('charts/Incidence/Age-adjusted/Incidence_by_Race_and_Theme4Quartile.png', plot=plots[[5]], width=8, height=5, units='in')
