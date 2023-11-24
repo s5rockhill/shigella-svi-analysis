@@ -1,10 +1,6 @@
 library('dplyr')
 library('ggplot2')
-#library('ggthemes')
-#library('data.table')
 library('tidyverse')
-#library('kableExtra')
-#library('ggsci')
 
 #--------------------------------------------------------------------------------
 #Import census tract population data
